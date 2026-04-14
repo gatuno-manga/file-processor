@@ -1,3 +1,5 @@
 module github.com/luis/file-processor
 
-go 1.23.12
+go 1.23.0
+
+require github.com/h2non/bimg v1.1.9
