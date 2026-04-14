@@ -35,7 +35,10 @@ Gatuno is a high-performance image processing microservice designed to sanitize 
   2. All image processing tasks are routed through a bounded worker pool, preventing system OOM.
   3. The worker pool size is configurable via environment variables, defaulting to `GOMAXPROCS`.
   4. gRPC requests respect context timeouts, ensuring long-running processes are cancelled correctly.
-**Plans**: TBD
+**Plans**: 3 plans
+- [x] 02-01-PLAN.md — gRPC Contract & Code Generation
+- [ ] 02-02-PLAN.md — Bounded Worker Pool Implementation
+- [ ] 02-03-PLAN.md — gRPC Server Implementation & Integration
 
 ### Phase 3: Asynchronous Kafka Integration
 **Goal**: Integrate Gatuno into event-driven workflows using Kafka topics.
@@ -45,7 +48,10 @@ Gatuno is a high-performance image processing microservice designed to sanitize 
   1. The service consumes image processing jobs from a configured Kafka input topic.
   2. Processed results (image bytes) are published to a configured Kafka output topic.
   3. Kafka consumer uses the same bounded worker pool for processing to maintain system stability.
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 03-01-PLAN.md — Storage Adapter & Interface Definitions
+- [ ] 03-02-PLAN.md — Kafka Adapter & Event Logic
+- [ ] 03-03-PLAN.md — Async Flow Orchestration
 
 ### Phase 4: Stability & Production Readiness
 **Goal**: Finalize resilience features and ensure the service is ready for high-availability environments.
@@ -63,6 +69,6 @@ Gatuno is a high-performance image processing microservice designed to sanitize 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Engine & Dockerized Build | 2/2 | Complete | 2024-04-14 |
-| 2. Synchronous API & Bounded Concurrency | 0/0 | Not started | - |
-| 3. Asynchronous Kafka Integration | 0/0 | Not started | - |
+| 2. Synchronous API & Bounded Concurrency | 0/3 | In progress | - |
+| 3. Asynchronous Kafka Integration | 0/3 | Not started | - |
 | 4. Stability & Production Readiness | 0/0 | Not started | - |
