@@ -2,7 +2,11 @@
 FROM golang:1.23-alpine3.20 AS builder
 
 # Install build dependencies for bimg/libvips
-RUN apk add --no-cache vips-dev build-base pkgconfig
+# bimg requires vips-dev, build-base, and pkgconfig
+RUN apk add --no-cache \
+    vips-dev \
+    build-base \
+    pkgconfig
 
 WORKDIR /app
 
@@ -18,18 +22,29 @@ COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -v -o server ./cmd/server/main.go
 
 # Stage 2: Final minimal image
-FROM alpine:latest
+FROM alpine:3.20
 
-# Install runtime dependencies for libvips
-RUN apk add --no-cache vips ca-certificates
+# Install runtime dependencies for libvips and CA certificates for S3
+RUN apk add --no-cache \
+    vips \
+    ca-certificates
 
-WORKDIR /root/
+# Create a non-root user for security
+RUN adduser -D -u 10001 appuser
+
+WORKDIR /app
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/server .
 
-# Expose the port (placeholder for now)
-EXPOSE 8080
+# Ensure the appuser can execute the binary
+RUN chown appuser:appuser /app/server
+
+# Switch to non-root user
+USER appuser
+
+# Expose gRPC port and Health/Metrics port
+EXPOSE 50051 8081
 
 # Command to run
-CMD ["./server"]
+ENTRYPOINT ["./server"]

@@ -11,7 +11,7 @@ const minimalGif = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 
 func TestProcess(t *testing.T) {
 	// Initialize libvips for test
-	InitVips()
+	InitVips(LoadConfig())
 
 	// Decode the base64 image
 	input, err := base64.StdEncoding.DecodeString(minimalGif)
