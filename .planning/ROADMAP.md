@@ -62,7 +62,7 @@ Gatuno is a high-performance image processing microservice designed to sanitize 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Engine & Dockerized Build | 0/2 | In progress | - |
+| 1. Core Engine & Dockerized Build | 2/2 | Complete | 2024-04-14 |
 | 2. Synchronous API & Bounded Concurrency | 0/0 | Not started | - |
 | 3. Asynchronous Kafka Integration | 0/0 | Not started | - |
 | 4. Stability & Production Readiness | 0/0 | Not started | - |
