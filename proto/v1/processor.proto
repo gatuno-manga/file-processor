@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package gatuno.v1;
+
+option go_package = "github.com/luis/file-processor/internal/api/grpc/pb";
+
+// ImageProcessor service for optimizing images.
+service ImageProcessor {
+  // Process transforms an image into a WebP format using bimg/libvips.
+  rpc Process(ProcessRequest) returns (ProcessResponse);
+}
+
+// ProcessRequest contains the raw image data to be processed.
+message ProcessRequest {
+  bytes data = 1;
+}
+
+// ProcessResponse contains the optimized image data.
+message ProcessResponse {
+  bytes data = 1;
+}
