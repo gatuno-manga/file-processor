@@ -35,6 +35,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	slog.Info("Gatuno File Processor starting...", "env", cfg.AppEnv)
+	slog.Info("Hot Reload Test: Air is working perfectly! 🚀")
 
 	processor.InitVips(cfg)
 	processor.DefaultQuality = cfg.WebPQuality

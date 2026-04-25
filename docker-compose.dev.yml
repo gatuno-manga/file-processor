@@ -1,0 +1,26 @@
+services:
+  gatuno-processor-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
+    ports:
+      - "${GRPC_EXTERNAL_PORT:-50052}:50051"
+      - "${HEALTH_EXTERNAL_PORT:-8082}:8081"
+    volumes:
+      - .:/app
+      - gocache:/root/.cache/go-build
+      - gomodcache:/go/pkg/mod
+    networks:
+      - gatuno_gatuno-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  gocache:
+  gomodcache:
+
+networks:
+  gatuno_gatuno-net:
+    external: true
