@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"testing"
@@ -15,6 +16,14 @@ import (
 )
 
 const minimalGif = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+
+func TestMain(m *testing.M) {
+	cfg := processor.LoadConfig()
+	processor.InitVips(cfg)
+	code := m.Run()
+	processor.ShutdownVips()
+	os.Exit(code)
+}
 
 func generateTestImage(width, height int) ([]byte, error) {
 	input, err := base64.StdEncoding.DecodeString(minimalGif)
@@ -33,10 +42,8 @@ func generateTestImage(width, height int) ([]byte, error) {
 
 func TestLoadConcurrency(t *testing.T) {
 	cfg := processor.LoadConfig()
-	processor.InitVips(cfg)
 	pool.InitPool(cfg.PoolSize)
 	defer pool.Shutdown()
-	defer processor.ShutdownVips()
 
 	resolutions := []struct {
 		name   string

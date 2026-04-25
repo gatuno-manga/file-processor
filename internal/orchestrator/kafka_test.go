@@ -35,6 +35,8 @@ func (m *mockStorage) Delete(ctx context.Context, bucket, key string) error {
 	return nil
 }
 
+func (m *mockStorage) Release(data []byte) {}
+
 type mockProducer struct {
 	emitFunc func(ctx context.Context, rawPath, targetBucket, targetPath string) error
 }

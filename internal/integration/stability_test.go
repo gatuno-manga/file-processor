@@ -107,14 +107,12 @@ func monitorResources(ctx context.Context, wg *sync.WaitGroup, m *Metrics) {
 
 func TestStabilityBenchmark(t *testing.T) {
 	cfg := processor.LoadConfig()
-	processor.InitVips(cfg)
 	pSize := cfg.PoolSize
 	if pSize <= 0 {
 		pSize = runtime.GOMAXPROCS(0)
 	}
 	pool.InitPool(pSize)
 	defer pool.Shutdown()
-	defer processor.ShutdownVips()
 
 	resolutions := []struct {
 		name   string
