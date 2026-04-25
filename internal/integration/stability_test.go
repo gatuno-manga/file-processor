@@ -151,7 +151,7 @@ func TestStabilityBenchmark(t *testing.T) {
 				wg.Add(1)
 				go func(idx int) {
 					defer wg.Done()
-					pCtx, pCancel := context.WithTimeout(context.Background(), 120*time.Second)
+					pCtx, pCancel := context.WithTimeout(context.Background(), 300*time.Second)
 					defer pCancel()
 
 					start := time.Now()

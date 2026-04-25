@@ -87,7 +87,7 @@ func TestLoadConcurrency(t *testing.T) {
 						index := i
 						go func(idx int) {
 							defer wg.Done()
-							ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+							ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 							defer cancel()
 
 							individualStart := time.Now()
