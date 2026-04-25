@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/luis/file-processor/internal/port"
+	"github.com/luis/file-processor/internal/processor"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -53,11 +54,22 @@ func NewKafkaAdapter(brokers []string, groupID, inputTopic, outputTopic string, 
 }
 
 // EmitProcessingCompletedEvent sends a message indicating image processing is complete.
-func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket, targetPath string) error {
+func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket, targetPath string, metadata *processor.Metadata) error {
 	event := ImageProcessingCompletedEvent{
 		RawPath:      rawPath,
 		TargetBucket: targetBucket,
 		TargetPath:   targetPath,
+		Metadata: &MetadataEventField{
+			Width:         metadata.Width,
+			Height:        metadata.Height,
+			SizeBytes:     metadata.SizeBytes,
+			MimeType:      metadata.MimeType,
+			FormatOrigin:  metadata.FormatOrigin,
+			BlurHash:      metadata.BlurHash,
+			DominantColor: metadata.DominantColor,
+			PHash:         metadata.PHash,
+			Entropy:       metadata.Entropy,
+		},
 	}
 
 	payload, err := json.Marshal(event)
@@ -76,7 +88,7 @@ func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath
 }
 
 // Consume starts listening for messages and processes them.
-func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, rawPath, targetBucket, targetPath string) error) error {
+func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error) error {
 	defer a.reader.Close()
 	defer a.writer.Close()
 
@@ -106,7 +118,7 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 		go func(m kafka.Message, e ImageProcessingRequestedEvent) {
 			defer func() { <-a.semaphore }()
 
-			if err := handler(ctx, e.RawPath, e.TargetBucket, e.TargetPath); err != nil {
+			if err := handler(ctx, e.RawPath, e.TargetBucket, e.TargetPath, e.IsBackfill); err != nil {
 				slog.Error("failed to handle image processing requested event", "error", err, "rawPath", e.RawPath)
 			}
 

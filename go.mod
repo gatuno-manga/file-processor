@@ -3,8 +3,12 @@ module github.com/luis/file-processor
 go 1.23.0
 
 require (
+	github.com/bbrks/go-blurhash v1.2.0
+	github.com/cenkalti/dominantcolor v1.0.3
+	github.com/corona10/goimagehash v1.1.0
 	github.com/h2non/bimg v1.1.9
 	github.com/minio/minio-go/v7 v7.0.80
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/prometheus/client_golang v1.20.0
 	github.com/segmentio/kafka-go v0.4.50
 	golang.org/x/image v0.20.0

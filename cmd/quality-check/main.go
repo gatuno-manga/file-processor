@@ -46,8 +46,8 @@ func main() {
 	} else {
 		fmt.Printf("Mode: Lossless\n")
 	}
-	fmt.Printf("%-30s | %-10s | %-10s | %-8s | %-8s\n", "Filename", "Original", "Compressed", "Savings", "PSNR")
-	fmt.Println(string(make([]byte, 85)))
+	fmt.Printf("%-30s | %-10s | %-10s | %-8s | %-8s | %-10s | %-15s | %-7s | %-16s\n", "Filename", "Original", "Compressed", "Savings", "PSNR", "Entropy", "BlurHash", "DomColor", "pHash")
+	fmt.Println(string(make([]byte, 160)))
 
 	summaryPath := filepath.Join(outputDir, "SUMMARY.md")
 	summaryFile, err := os.Create(summaryPath)
@@ -58,8 +58,8 @@ func main() {
 		fmt.Fprintf(summaryFile, "# Quality Test Summary\n\n")
 		fmt.Fprintf(summaryFile, "Date: %s\n", time.Now().Format(time.RFC1123))
 		fmt.Fprintf(summaryFile, "Mode: %s\n\n", map[bool]string{true: fmt.Sprintf("Lossy (Quality: %d)", quality), false: "Lossless"}[quality > 0])
-		fmt.Fprintf(summaryFile, "| Filename | Original | Compressed | Savings | PSNR | Duration |\n")
-		fmt.Fprintf(summaryFile, "| :--- | :--- | :--- | :--- | :--- | :--- |\n")
+		fmt.Fprintf(summaryFile, "| Filename | Original | Compressed | Savings | PSNR | Entropy | BlurHash | DomColor | pHash | Duration |\n")
+		fmt.Fprintf(summaryFile, "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n")
 	}
 
 	var totalOriginal int64
@@ -92,7 +92,7 @@ func main() {
 		}
 
 		start := time.Now()
-		processed, err := processor.ProcessLossy(data, quality)
+		processed, metadata, err := processor.ProcessLossy(data, quality, false)
 		duration := time.Since(start).Round(time.Millisecond)
 
 		if err != nil {
@@ -124,21 +124,40 @@ func main() {
 			psnrStr = "Perfect"
 		}
 
-		fmt.Printf("%-30s | %-10s | %-10s | %-7.2f%% | %-8s (%v)\n", 
+		entropy := 0.0
+		blurHash := ""
+		dominantColor := ""
+		pHash := ""
+		if metadata != nil {
+			entropy = metadata.Entropy
+			blurHash = metadata.BlurHash
+			dominantColor = metadata.DominantColor
+			pHash = metadata.PHash
+		}
+
+		fmt.Printf("%-30s | %-10s | %-10s | %-7.2f%% | %-8s | Ent: %-5.2f | BH: %-15s | DC: %-7s | pH: %-16s | (%v)\n", 
 			file.Name(), 
 			formatSize(int(originalSize)), 
 			formatSize(int(compressedSize)), 
 			savings,
 			psnrStr,
+			entropy,
+			blurHash,
+			dominantColor,
+			pHash,
 			duration)
 
 		if summaryFile != nil {
-			fmt.Fprintf(summaryFile, "| %s | %s | %s | %.2f%% | %s | %v |\n",
+			fmt.Fprintf(summaryFile, "| %s | %s | %s | %.2f%% | %s | %.2f | %s | %s | %s | %v |\n",
 				file.Name(),
 				formatSize(int(originalSize)),
 				formatSize(int(compressedSize)),
 				savings,
 				psnrStr,
+				entropy,
+				blurHash,
+				dominantColor,
+				pHash,
 				duration)
 		}
 	}

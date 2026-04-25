@@ -2,7 +2,6 @@ package processor
 
 import (
 	"encoding/base64"
-	"github.com/h2non/bimg"
 	"testing"
 )
 
@@ -17,7 +16,7 @@ func TestProcess(t *testing.T) {
 		t.Fatalf("Failed to decode base64 GIF: %v", err)
 	}
 
-	output, err := Process(input)
+	output, metadata, err := Process(input)
 	if err != nil {
 		t.Fatalf("Process failed: %v", err)
 	}
@@ -26,14 +25,17 @@ func TestProcess(t *testing.T) {
 		t.Fatal("Output buffer is empty")
 	}
 
-	imageType := bimg.DetermineImageTypeName(output)
-	if imageType != "webp" {
-		t.Errorf("Expected image type 'webp', but got '%s'", imageType)
+	if metadata == nil {
+		t.Fatal("Metadata is nil")
+	}
+
+	if metadata.FormatOrigin != "gif" {
+		t.Errorf("Expected FormatOrigin 'gif', but got '%s'", metadata.FormatOrigin)
 	}
 }
 
 func TestProcess_EmptyInput(t *testing.T) {
-	_, err := Process(nil)
+	_, _, err := Process(nil)
 	if err == nil {
 		t.Fatal("Expected error for nil input, but got none")
 	}

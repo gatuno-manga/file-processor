@@ -35,7 +35,7 @@ func (s *Server) Process(ctx context.Context, req *pb.ProcessRequest) (*pb.Proce
 		return nil, status.Error(codes.InvalidArgument, "empty request data")
 	}
 
-	res, err := pool.Submit(ctx, req.GetData())
+	res, _, err := pool.Submit(ctx, req.GetData(), false)
 	if err != nil {
 		if err == context.DeadlineExceeded {
 			return nil, status.Error(codes.DeadlineExceeded, "processing deadline exceeded")

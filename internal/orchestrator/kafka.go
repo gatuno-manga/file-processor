@@ -27,14 +27,14 @@ func NewKafkaOrchestrator(storage port.Storage, producer port.KafkaProducer) *Ka
 // Run starts the orchestration by consuming from the Kafka consumer.
 func (o *KafkaOrchestrator) Run(ctx context.Context, consumer port.KafkaConsumer) error {
 	slog.Info("Kafka orchestrator starting...")
-	return consumer.Consume(ctx, func(ctx context.Context, rawPath, targetBucket, targetPath string) error {
-		return o.Handle(ctx, rawPath, targetBucket, targetPath)
+	return consumer.Consume(ctx, func(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error {
+		return o.Handle(ctx, rawPath, targetBucket, targetPath, isBackfill)
 	})
 }
 
 // Handle processes a single image processing request from Kafka.
-func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, targetPath string) error {
-	slog.Info("processing image", "rawPath", rawPath, "targetBucket", targetBucket, "targetPath", targetPath)
+func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error {
+	slog.Info("processing image", "rawPath", rawPath, "targetBucket", targetBucket, "targetPath", targetPath, "isBackfill", isBackfill)
 
 	parts := strings.SplitN(rawPath, "/", 2)
 	if len(parts) < 2 {
@@ -48,23 +48,32 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, t
 		return fmt.Errorf("failed to download image from s3: %w", err)
 	}
 
-	processedData, err := pool.Submit(ctx, data)
+	processedData, metadata, err := pool.Submit(ctx, data, isBackfill)
 	o.storage.Release(data)
 	if err != nil {
 		return fmt.Errorf("failed to process image in pool: %w", err)
 	}
 
-	err = o.storage.Upload(ctx, targetBucket, targetPath, processedData)
-	if err != nil {
-		return fmt.Errorf("failed to upload processed image to s3: %w", err)
+	// Optimization for backfill: if image is same (same path and isBackfill),
+	// and processedData is same as original data (length-wise check as heuristic, 
+	// or we can just rely on the processor returning the original bytes).
+	// The requirement says: "Go can opt for only extracting metadata and returning, without re-upload".
+	// Since ProcessLossy returns original bytes if isBackfill and already webp.
+	if !isBackfill || (targetBucket != rawBucket || targetPath != rawKey) {
+		err = o.storage.Upload(ctx, targetBucket, targetPath, processedData)
+		if err != nil {
+			return fmt.Errorf("failed to upload processed image to s3: %w", err)
+		}
 	}
 
-	err = o.storage.Delete(ctx, rawBucket, rawKey)
-	if err != nil {
-		slog.Warn("failed to delete original image from s3", "error", err, "bucket", rawBucket, "key", rawKey)
+	if !isBackfill {
+		err = o.storage.Delete(ctx, rawBucket, rawKey)
+		if err != nil {
+			slog.Warn("failed to delete original image from s3", "error", err, "bucket", rawBucket, "key", rawKey)
+		}
 	}
 
-	err = o.producer.EmitProcessingCompletedEvent(ctx, rawPath, targetBucket, targetPath)
+	err = o.producer.EmitProcessingCompletedEvent(ctx, rawPath, targetBucket, targetPath, metadata)
 	if err != nil {
 		return fmt.Errorf("failed to emit processing completed event to kafka: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/luis/file-processor/internal/processor"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -68,12 +69,16 @@ func TestKafkaAdapter_EmitProcessingCompletedEvent(t *testing.T) {
 			if event.RawPath != "processing/test.jpg" || event.TargetBucket != "books" || event.TargetPath != "test.webp" {
 				return errors.New("unexpected event data")
 			}
+			if event.Metadata == nil || event.Metadata.MimeType != "image/webp" {
+				return errors.New("unexpected metadata")
+			}
 			return nil
 		},
 	}
 
 	adapter := &KafkaAdapter{writer: mw}
-	err := adapter.EmitProcessingCompletedEvent(context.Background(), "processing/test.jpg", "books", "test.webp")
+	metadata := &processor.Metadata{MimeType: "image/webp"}
+	err := adapter.EmitProcessingCompletedEvent(context.Background(), "processing/test.jpg", "books", "test.webp", metadata)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -84,6 +89,7 @@ func TestKafkaAdapter_Consume(t *testing.T) {
 		RawPath:      "processing/test.jpg",
 		TargetBucket: "books",
 		TargetPath:   "test.webp",
+		IsBackfill:   true,
 	}
 	payload, _ := json.Marshal(event)
 
@@ -113,8 +119,8 @@ func TestKafkaAdapter_Consume(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var handled bool
-	handler := func(ctx context.Context, rawPath, targetBucket, targetPath string) error {
-		if rawPath == "processing/test.jpg" && targetBucket == "books" && targetPath == "test.webp" {
+	handler := func(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error {
+		if rawPath == "processing/test.jpg" && targetBucket == "books" && targetPath == "test.webp" && isBackfill {
 			handled = true
 		}
 		cancel()

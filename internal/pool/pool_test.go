@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/luis/file-processor/internal/processor"
 )
 
 func TestInitPool(t *testing.T) {
@@ -23,7 +25,7 @@ func TestInitPool(t *testing.T) {
 
 func TestSubmit_ErrorNotInitialized(t *testing.T) {
 	ResetPoolForTest()
-	_, err := Submit(context.Background(), []byte("data"))
+	_, _, err := Submit(context.Background(), []byte("data"), false)
 	if err == nil || err.Error() != "worker pool not initialized" {
 		t.Errorf("expected 'worker pool not initialized' error, got %v", err)
 	}
@@ -32,14 +34,14 @@ func TestSubmit_ErrorNotInitialized(t *testing.T) {
 func TestSubmit_Success(t *testing.T) {
 	ResetPoolForTest()
 	oldProcessFunc := processFunc
-	processFunc = func(data []byte) ([]byte, error) {
-		return []byte("processed"), nil
+	processFunc = func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
+		return []byte("processed"), &processor.Metadata{}, nil
 	}
 	defer func() { processFunc = oldProcessFunc }()
 
 	InitPool(1)
 
-	res, err := Submit(context.Background(), []byte("input"))
+	res, _, err := Submit(context.Background(), []byte("input"), false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,9 +53,9 @@ func TestSubmit_Success(t *testing.T) {
 func TestSubmit_Timeout(t *testing.T) {
 	ResetPoolForTest()
 	oldProcessFunc := processFunc
-	processFunc = func(data []byte) ([]byte, error) {
+	processFunc = func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
 		time.Sleep(10 * time.Millisecond)
-		return []byte("processed"), nil
+		return []byte("processed"), nil, nil
 	}
 	defer func() { processFunc = oldProcessFunc }()
 
@@ -62,7 +64,7 @@ func TestSubmit_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	_, err := Submit(ctx, []byte("some data"))
+	_, _, err := Submit(ctx, []byte("some data"), false)
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
 	}
@@ -76,7 +78,7 @@ func TestShutdown(t *testing.T) {
 		t.Errorf("expected jobChan to be nil after Shutdown")
 	}
 
-	_, err := Submit(context.Background(), []byte("data"))
+	_, _, err := Submit(context.Background(), []byte("data"), false)
 	if err == nil || err.Error() != "worker pool not initialized" {
 		t.Errorf("expected 'worker pool not initialized' error, got %v", err)
 	}

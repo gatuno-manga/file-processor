@@ -10,22 +10,26 @@ import (
 )
 
 type job struct {
-	ctx    context.Context
-	data   []byte
-	result chan response
+	ctx        context.Context
+	data       []byte
+	isBackfill bool
+	result     chan response
 }
 
 type response struct {
-	data []byte
-	err  error
+	data     []byte
+	metadata *processor.Metadata
+	err      error
 }
 
 var (
 	jobChan     chan job
 	poolSize    int
-	processFunc = processor.Process
-	wg          sync.WaitGroup
-	mu          sync.Mutex
+	processFunc = func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
+		return processor.ProcessLossy(data, quality, isBackfill)
+	}
+	wg sync.WaitGroup
+	mu sync.Mutex
 
 	chanPool = sync.Pool{
 		New: func() interface{} {
@@ -35,7 +39,7 @@ var (
 )
 
 // SetProcessFunc allows overriding the processing logic, mainly for testing.
-func SetProcessFunc(f func([]byte) ([]byte, error)) {
+func SetProcessFunc(f func([]byte, int, bool) ([]byte, *processor.Metadata, error)) {
 	processFunc = f
 }
 
@@ -71,8 +75,8 @@ func worker(ch chan job) {
 		default:
 		}
 
-		res, err := processFunc(j.data)
-		j.result <- response{data: res, err: err}
+		res, meta, err := processFunc(j.data, processor.DefaultQuality, j.isBackfill)
+		j.result <- response{data: res, metadata: meta, err: err}
 	}
 }
 
@@ -105,34 +109,35 @@ func ResetPoolForTest() {
 }
 
 // Submit sends a job to the worker pool and blocks until completion or context expiration.
-func Submit(ctx context.Context, data []byte) ([]byte, error) {
+func Submit(ctx context.Context, data []byte, isBackfill bool) ([]byte, *processor.Metadata, error) {
 	mu.Lock()
 	ch := jobChan
 	mu.Unlock()
 
 	if ch == nil {
-		return nil, errors.New("worker pool not initialized")
+		return nil, nil, errors.New("worker pool not initialized")
 	}
 
 	resChan := chanPool.Get().(chan response)
 	defer chanPool.Put(resChan)
 
 	j := job{
-		ctx:    ctx,
-		data:   data,
-		result: resChan,
+		ctx:        ctx,
+		data:       data,
+		isBackfill: isBackfill,
+		result:     resChan,
 	}
 
 	select {
 	case ch <- j:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	}
 
 	select {
 	case res := <-resChan:
-		return res.data, res.err
+		return res.data, res.metadata, res.err
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	}
 }
