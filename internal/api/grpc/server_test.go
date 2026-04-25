@@ -9,6 +9,7 @@ import (
 
 	"github.com/luis/file-processor/internal/api/grpc/pb"
 	"github.com/luis/file-processor/internal/pool"
+	"github.com/luis/file-processor/internal/processor"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -20,9 +21,9 @@ const bufSize = 1024 * 1024
 
 var lis *bufconn.Listener
 
-func mockProcess(data []byte) ([]byte, error) {
+func mockProcess(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
 	time.Sleep(50 * time.Millisecond)
-	return append([]byte("processed: "), data...), nil
+	return append([]byte("processed: "), data...), &processor.Metadata{SizeBytes: len(data) + 11}, nil
 }
 
 func init() {

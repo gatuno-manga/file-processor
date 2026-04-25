@@ -91,7 +91,7 @@ func TestLoadConcurrency(t *testing.T) {
 							defer cancel()
 
 							individualStart := time.Now()
-							_, err := pool.Submit(ctx, input)
+							_, _, err := pool.Submit(ctx, input, false)
 							elapsed := time.Since(individualStart)
 							
 							if err != nil {

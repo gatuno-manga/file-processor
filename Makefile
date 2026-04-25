@@ -21,8 +21,8 @@ logs:
 	$(COMPOSE_DEV) logs -f
 
 test:
-	@echo "Running tests..."
-	go test -v ./...
+	@echo "Running tests inside dev container..."
+	$(COMPOSE_DEV) run --rm gatuno-processor-dev go test -v ./...
 
 clean:
 	@echo "Cleaning up..."

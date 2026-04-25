@@ -155,7 +155,7 @@ func TestStabilityBenchmark(t *testing.T) {
 					defer pCancel()
 
 					start := time.Now()
-					_, err := pool.Submit(pCtx, input)
+					_, _, err := pool.Submit(pCtx, input, false)
 					elapsed := time.Since(start)
 
 					if err != nil {
