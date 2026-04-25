@@ -25,12 +25,13 @@ type kafkaReader interface {
 
 // KafkaAdapter implements both port.KafkaProducer and port.KafkaConsumer.
 type KafkaAdapter struct {
-	writer kafkaWriter
-	reader kafkaReader
+	writer    kafkaWriter
+	reader    kafkaReader
+	semaphore chan struct{}
 }
 
 // NewKafkaAdapter creates a new KafkaAdapter.
-func NewKafkaAdapter(brokers []string, inputTopic, outputTopic string) *KafkaAdapter {
+func NewKafkaAdapter(brokers []string, groupID, inputTopic, outputTopic string, maxConcurrentTasks int) *KafkaAdapter {
 	writer := &kafka.Writer{
 		Addr:     kafka.TCP(brokers...),
 		Topic:    outputTopic,
@@ -38,27 +39,30 @@ func NewKafkaAdapter(brokers []string, inputTopic, outputTopic string) *KafkaAda
 	}
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: brokers,
-		Topic:   inputTopic,
-		GroupID: "file-processor-group",
+		Brokers:     brokers,
+		Topic:       inputTopic,
+		GroupID:     groupID,
+		StartOffset: kafka.FirstOffset,
 	})
 
 	return &KafkaAdapter{
-		writer: writer,
-		reader: reader,
+		writer:    writer,
+		reader:    reader,
+		semaphore: make(chan struct{}, maxConcurrentTasks),
 	}
 }
 
-// EmitSanitizedEvent sends a message indicating a file has been sanitized.
-func (a *KafkaAdapter) EmitSanitizedEvent(ctx context.Context, key, bucket string) error {
-	event := FileSanitizedEvent{
-		Bucket: bucket,
-		Key:    key,
+// EmitProcessingCompletedEvent sends a message indicating image processing is complete.
+func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket, targetPath string) error {
+	event := ImageProcessingCompletedEvent{
+		RawPath:      rawPath,
+		TargetBucket: targetBucket,
+		TargetPath:   targetPath,
 	}
 
 	payload, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal sanitized event: %w", err)
+		return fmt.Errorf("failed to marshal processing completed event: %w", err)
 	}
 
 	err = a.writer.WriteMessages(ctx, kafka.Message{
@@ -72,7 +76,7 @@ func (a *KafkaAdapter) EmitSanitizedEvent(ctx context.Context, key, bucket strin
 }
 
 // Consume starts listening for messages and processes them.
-func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, key, bucket string) error) error {
+func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, rawPath, targetBucket, targetPath string) error) error {
 	defer a.reader.Close()
 	defer a.writer.Close()
 
@@ -86,22 +90,30 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 			continue
 		}
 
-		var event ImageDownloadedEvent
+		var event ImageProcessingRequestedEvent
 		if err := json.Unmarshal(msg.Value, &event); err != nil {
-			slog.Error("failed to unmarshal image downloaded event", "error", err)
+			slog.Error("failed to unmarshal image processing requested event", "error", err)
 			a.reader.CommitMessages(ctx, msg)
 			continue
 		}
 
-		if err := handler(ctx, event.Key, event.Bucket); err != nil {
-			slog.Error("failed to handle image downloaded event", "error", err, "key", event.Key, "bucket", event.Bucket)
-			// Depending on policy, we might want to retry or skip.
-			// For now, we commit to avoid infinite loop on bad data.
+		select {
+		case a.semaphore <- struct{}{}:
+		case <-ctx.Done():
+			return nil
 		}
 
-		if err := a.reader.CommitMessages(ctx, msg); err != nil {
-			slog.Error("failed to commit message to kafka", "error", err)
-		}
+		go func(m kafka.Message, e ImageProcessingRequestedEvent) {
+			defer func() { <-a.semaphore }()
+
+			if err := handler(ctx, e.RawPath, e.TargetBucket, e.TargetPath); err != nil {
+				slog.Error("failed to handle image processing requested event", "error", err, "rawPath", e.RawPath)
+			}
+
+			if err := a.reader.CommitMessages(ctx, m); err != nil {
+				slog.Error("failed to commit message to kafka", "error", err)
+			}
+		}(msg, event)
 	}
 }
 
@@ -110,6 +122,5 @@ func (a *KafkaAdapter) IsReady() bool {
 	return a.writer != nil && a.reader != nil
 }
 
-// Ensure KafkaAdapter implements the ports.
 var _ port.KafkaProducer = (*KafkaAdapter)(nil)
 var _ port.KafkaConsumer = (*KafkaAdapter)(nil)

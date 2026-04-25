@@ -55,17 +55,17 @@ func (m *mockKafkaReader) Close() error {
 	return nil
 }
 
-func TestKafkaAdapter_EmitSanitizedEvent(t *testing.T) {
+func TestKafkaAdapter_EmitProcessingCompletedEvent(t *testing.T) {
 	mw := &mockKafkaWriter{
 		writeFunc: func(ctx context.Context, msgs ...kafka.Message) error {
 			if len(msgs) != 1 {
 				return errors.New("expected 1 message")
 			}
-			var event FileSanitizedEvent
+			var event ImageProcessingCompletedEvent
 			if err := json.Unmarshal(msgs[0].Value, &event); err != nil {
 				return err
 			}
-			if event.Bucket != "test-bucket" || event.Key != "test-key" {
+			if event.RawPath != "processing/test.jpg" || event.TargetBucket != "books" || event.TargetPath != "test.webp" {
 				return errors.New("unexpected event data")
 			}
 			return nil
@@ -73,14 +73,18 @@ func TestKafkaAdapter_EmitSanitizedEvent(t *testing.T) {
 	}
 
 	adapter := &KafkaAdapter{writer: mw}
-	err := adapter.EmitSanitizedEvent(context.Background(), "test-key", "test-bucket")
+	err := adapter.EmitProcessingCompletedEvent(context.Background(), "processing/test.jpg", "books", "test.webp")
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
 }
 
 func TestKafkaAdapter_Consume(t *testing.T) {
-	event := ImageDownloadedEvent{Bucket: "test-bucket", Key: "test-key"}
+	event := ImageProcessingRequestedEvent{
+		RawPath:      "processing/test.jpg",
+		TargetBucket: "books",
+		TargetPath:   "test.webp",
+	}
 	payload, _ := json.Marshal(event)
 
 	mr := &mockKafkaReader{
@@ -105,15 +109,15 @@ func TestKafkaAdapter_Consume(t *testing.T) {
 		},
 	}
 
-	adapter := &KafkaAdapter{reader: mr, writer: mw}
+	adapter := &KafkaAdapter{reader: mr, writer: mw, semaphore: make(chan struct{}, 1)}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var handled bool
-	handler := func(ctx context.Context, key, bucket string) error {
-		if key == "test-key" && bucket == "test-bucket" {
+	handler := func(ctx context.Context, rawPath, targetBucket, targetPath string) error {
+		if rawPath == "processing/test.jpg" && targetBucket == "books" && targetPath == "test.webp" {
 			handled = true
 		}
-		cancel() // Stop the loop
+		cancel()
 		return nil
 	}
 

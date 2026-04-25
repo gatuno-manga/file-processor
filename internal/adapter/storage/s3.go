@@ -5,15 +5,24 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 5*1024*1024)
+		return &b
+	},
+}
+
 // minioClient defines the subset of minio.Client methods used by the adapter, returning io.ReadCloser for testability.
 type minioClient interface {
 	GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (io.ReadCloser, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (info minio.UploadInfo, err error)
+	RemoveObject(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error
 }
 
 // minioClientImpl wraps the real minio.Client.
@@ -27,6 +36,10 @@ func (m *minioClientImpl) GetObject(ctx context.Context, bucketName, objectName 
 
 func (m *minioClientImpl) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (minio.UploadInfo, error) {
 	return m.client.PutObject(ctx, bucketName, objectName, reader, objectSize, opts)
+}
+
+func (m *minioClientImpl) RemoveObject(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error {
+	return m.client.RemoveObject(ctx, bucketName, objectName, opts)
 }
 
 // S3Adapter implements the Storage port for S3-compatible storage.
@@ -55,12 +68,16 @@ func (a *S3Adapter) Download(ctx context.Context, bucket, key string) ([]byte, e
 	}
 	defer object.Close()
 
-	data, err := io.ReadAll(object)
+	ptr := bufferPool.Get().(*[]byte)
+	buf := bytes.NewBuffer((*ptr)[:0])
+
+	_, err = io.Copy(buf, object)
 	if err != nil {
+		bufferPool.Put(ptr)
 		return nil, fmt.Errorf("failed to read object data: %w", err)
 	}
 
-	return data, nil
+	return buf.Bytes(), nil
 }
 
 // Upload stores the given data as an object in the specified bucket and key.
@@ -73,4 +90,19 @@ func (a *S3Adapter) Upload(ctx context.Context, bucket, key string, data []byte)
 	}
 
 	return nil
+}
+
+// Delete removes an object from the specified bucket and key.
+func (a *S3Adapter) Delete(ctx context.Context, bucket, key string) error {
+	err := a.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to delete object from s3: %w", err)
+	}
+
+	return nil
+}
+
+// Release returns the buffer to the pool.
+func (a *S3Adapter) Release(data []byte) {
+	bufferPool.Put(&data)
 }

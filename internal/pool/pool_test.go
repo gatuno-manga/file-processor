@@ -31,7 +31,6 @@ func TestSubmit_ErrorNotInitialized(t *testing.T) {
 
 func TestSubmit_Success(t *testing.T) {
 	ResetPoolForTest()
-	// Mock processFunc to return success
 	oldProcessFunc := processFunc
 	processFunc = func(data []byte) ([]byte, error) {
 		return []byte("processed"), nil
@@ -51,7 +50,6 @@ func TestSubmit_Success(t *testing.T) {
 
 func TestSubmit_Timeout(t *testing.T) {
 	ResetPoolForTest()
-	// Mock processFunc to be slow
 	oldProcessFunc := processFunc
 	processFunc = func(data []byte) ([]byte, error) {
 		time.Sleep(10 * time.Millisecond)

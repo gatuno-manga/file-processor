@@ -14,7 +14,6 @@ import (
 	"github.com/luis/file-processor/internal/processor"
 )
 
-// A minimal 1x1 transparent GIF image
 const minimalGif = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 
 func generateTestImage(width, height int) ([]byte, error) {
@@ -25,7 +24,6 @@ func generateTestImage(width, height int) ([]byte, error) {
 	if width <= 1 && height <= 1 {
 		return input, nil
 	}
-	// Resize minimal image to target resolution to create a "large" buffer
 	return bimg.NewImage(input).Process(bimg.Options{
 		Width:  width,
 		Height: height,
@@ -34,7 +32,6 @@ func generateTestImage(width, height int) ([]byte, error) {
 }
 
 func TestLoadConcurrency(t *testing.T) {
-	// Initialize libvips and pool
 	cfg := processor.LoadConfig()
 	processor.InitVips(cfg)
 	pool.InitPool(cfg.PoolSize)
@@ -62,7 +59,6 @@ func TestLoadConcurrency(t *testing.T) {
 			t.Logf("Generated %s image (Size: %.2f KB)", res.name, float64(len(input))/1024)
 
 			for _, count := range testCounts {
-				// Reduce 1000 batch for 4K if it's too slow in restricted environments
 				if res.name == "4K" && count > 100 {
 					continue 
 				}
@@ -73,7 +69,6 @@ func TestLoadConcurrency(t *testing.T) {
 					durations := make([]time.Duration, count)
 					var mu sync.Mutex
 					
-					// Capture memory stats before batch
 					var memStart runtime.MemStats
 					runtime.GC()
 					runtime.ReadMemStats(&memStart)
@@ -85,7 +80,6 @@ func TestLoadConcurrency(t *testing.T) {
 						index := i
 						go func(idx int) {
 							defer wg.Done()
-							// Use a generous timeout for large images
 							ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 							defer cancel()
 
@@ -110,7 +104,6 @@ func TestLoadConcurrency(t *testing.T) {
 					var memEnd runtime.MemStats
 					runtime.ReadMemStats(&memEnd)
 					
-					// Stats
 					var total time.Duration
 					var min time.Duration = 999 * time.Hour
 					var max time.Duration

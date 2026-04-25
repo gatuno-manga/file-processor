@@ -1,0 +1,16 @@
+services:
+  gatuno-processor:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "${GRPC_EXTERNAL_PORT:-50052}:50051"
+      - "${HEALTH_EXTERNAL_PORT:-8082}:8081"
+    networks:
+      - gatuno_gatuno-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  gatuno_gatuno-net:
+    external: true

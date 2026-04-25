@@ -1,13 +1,15 @@
 package kafka
 
-// ImageDownloadedEvent represents the payload from the image.downloaded topic.
-type ImageDownloadedEvent struct {
-	Bucket string `json:"bucket"`
-	Key    string `json:"key"`
+// ImageProcessingRequestedEvent represents the payload from the image.processing.requested topic.
+type ImageProcessingRequestedEvent struct {
+	RawPath      string `json:"rawPath"`
+	TargetBucket string `json:"targetBucket"`
+	TargetPath   string `json:"targetPath"`
 }
 
-// FileSanitizedEvent represents the payload sent to the file.sanitized topic.
-type FileSanitizedEvent struct {
-	Bucket string `json:"bucket"`
-	Key    string `json:"key"`
+// ImageProcessingCompletedEvent represents the payload sent to the image.processing.completed topic.
+type ImageProcessingCompletedEvent struct {
+	RawPath      string `json:"rawPath"`
+	TargetBucket string `json:"targetBucket"`
+	TargetPath   string `json:"targetPath"`
 }

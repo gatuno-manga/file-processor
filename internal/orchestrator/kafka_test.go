@@ -11,6 +11,7 @@ import (
 type mockStorage struct {
 	downloadFunc func(ctx context.Context, bucket, key string) ([]byte, error)
 	uploadFunc   func(ctx context.Context, bucket, key string, data []byte) error
+	deleteFunc   func(ctx context.Context, bucket, key string) error
 }
 
 func (m *mockStorage) Download(ctx context.Context, bucket, key string) ([]byte, error) {
@@ -27,19 +28,25 @@ func (m *mockStorage) Upload(ctx context.Context, bucket, key string, data []byt
 	return nil
 }
 
-type mockProducer struct {
-	emitFunc func(ctx context.Context, key, bucket string) error
+func (m *mockStorage) Delete(ctx context.Context, bucket, key string) error {
+	if m.deleteFunc != nil {
+		return m.deleteFunc(ctx, bucket, key)
+	}
+	return nil
 }
 
-func (m *mockProducer) EmitSanitizedEvent(ctx context.Context, key, bucket string) error {
+type mockProducer struct {
+	emitFunc func(ctx context.Context, rawPath, targetBucket, targetPath string) error
+}
+
+func (m *mockProducer) EmitProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket, targetPath string) error {
 	if m.emitFunc != nil {
-		return m.emitFunc(ctx, key, bucket)
+		return m.emitFunc(ctx, rawPath, targetBucket, targetPath)
 	}
 	return nil
 }
 
 func TestKafkaOrchestrator_Handle(t *testing.T) {
-	// Initialize pool for test
 	pool.InitPool(1)
 	pool.SetProcessFunc(func(data []byte) ([]byte, error) {
 		return []byte("sanitized"), nil
@@ -47,26 +54,38 @@ func TestKafkaOrchestrator_Handle(t *testing.T) {
 
 	ms := &mockStorage{
 		downloadFunc: func(ctx context.Context, bucket, key string) ([]byte, error) {
+			if bucket != "processing" || key != "ab/test.jpg" {
+				return nil, errors.New("unexpected download arguments")
+			}
 			return []byte("original"), nil
 		},
 		uploadFunc: func(ctx context.Context, bucket, key string, data []byte) error {
+			if bucket != "books" || key != "ab/test.webp" {
+				return errors.New("unexpected upload arguments")
+			}
 			if string(data) != "sanitized" {
 				return errors.New("unexpected data uploaded")
 			}
 			return nil
 		},
+		deleteFunc: func(ctx context.Context, bucket, key string) error {
+			if bucket != "processing" || key != "ab/test.jpg" {
+				return errors.New("unexpected delete arguments")
+			}
+			return nil
+		},
 	}
 	mp := &mockProducer{
-		emitFunc: func(ctx context.Context, key, bucket string) error {
-			if key != "test-key.sanitized.webp" {
-				return errors.New("unexpected key emitted")
+		emitFunc: func(ctx context.Context, rawPath, targetBucket, targetPath string) error {
+			if rawPath != "processing/ab/test.jpg" || targetBucket != "books" || targetPath != "ab/test.webp" {
+				return errors.New("unexpected event emitted")
 			}
 			return nil
 		},
 	}
 
 	o := NewKafkaOrchestrator(ms, mp)
-	err := o.Handle(context.Background(), "test-key", "test-bucket")
+	err := o.Handle(context.Background(), "processing/ab/test.jpg", "books", "ab/test.webp")
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}

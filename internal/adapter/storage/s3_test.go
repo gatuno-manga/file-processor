@@ -11,8 +11,9 @@ import (
 )
 
 type mockMinioClient struct {
-	getObjectFunc func(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (io.ReadCloser, error)
-	putObjectFunc func(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (minio.UploadInfo, error)
+	getObjectFunc    func(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (io.ReadCloser, error)
+	putObjectFunc    func(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (minio.UploadInfo, error)
+	removeObjectFunc func(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error
 }
 
 func (m *mockMinioClient) GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (io.ReadCloser, error) {
@@ -27,6 +28,13 @@ func (m *mockMinioClient) PutObject(ctx context.Context, bucketName, objectName 
 		return m.putObjectFunc(ctx, bucketName, objectName, reader, objectSize, opts)
 	}
 	return minio.UploadInfo{}, nil
+}
+
+func (m *mockMinioClient) RemoveObject(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error {
+	if m.removeObjectFunc != nil {
+		return m.removeObjectFunc(ctx, bucketName, objectName, opts)
+	}
+	return nil
 }
 
 func TestS3Adapter_Download(t *testing.T) {
@@ -74,4 +82,27 @@ func TestS3Adapter_Upload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+}
+
+func TestS3Adapter_Delete(t *testing.T) {
+	mc := &mockMinioClient{
+		removeObjectFunc: func(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error {
+			if bucketName != "test-bucket" || objectName != "test-key" {
+				return fmt.Errorf("unexpected arguments")
+			}
+			return nil
+		},
+	}
+
+	adapter := &S3Adapter{client: mc}
+	err := adapter.Delete(context.Background(), "test-bucket", "test-key")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestS3Adapter_Release(t *testing.T) {
+	adapter := &S3Adapter{}
+	data := make([]byte, 10)
+	adapter.Release(data)
 }

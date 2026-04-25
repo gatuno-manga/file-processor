@@ -10,16 +10,13 @@ import (
 const minimalGif = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 
 func TestProcess(t *testing.T) {
-	// Initialize libvips for test
 	InitVips(LoadConfig())
 
-	// Decode the base64 image
 	input, err := base64.StdEncoding.DecodeString(minimalGif)
 	if err != nil {
 		t.Fatalf("Failed to decode base64 GIF: %v", err)
 	}
 
-	// Process the image
 	output, err := Process(input)
 	if err != nil {
 		t.Fatalf("Process failed: %v", err)
@@ -29,7 +26,6 @@ func TestProcess(t *testing.T) {
 		t.Fatal("Output buffer is empty")
 	}
 
-	// Verify it's a valid WebP image
 	imageType := bimg.DetermineImageTypeName(output)
 	if imageType != "webp" {
 		t.Errorf("Expected image type 'webp', but got '%s'", imageType)

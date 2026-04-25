@@ -26,6 +26,12 @@ var (
 	processFunc = processor.Process
 	wg          sync.WaitGroup
 	mu          sync.Mutex
+
+	chanPool = sync.Pool{
+		New: func() interface{} {
+			return make(chan response, 1)
+		},
+	}
 )
 
 // SetProcessFunc allows overriding the processing logic, mainly for testing.
@@ -58,7 +64,6 @@ func InitPool(size int) {
 func worker(ch chan job) {
 	defer wg.Done()
 	for j := range ch {
-		// Check if context is already done before processing
 		select {
 		case <-j.ctx.Done():
 			j.result <- response{err: j.ctx.Err()}
@@ -109,21 +114,21 @@ func Submit(ctx context.Context, data []byte) ([]byte, error) {
 		return nil, errors.New("worker pool not initialized")
 	}
 
-	resChan := make(chan response, 1)
+	resChan := chanPool.Get().(chan response)
+	defer chanPool.Put(resChan)
+
 	j := job{
 		ctx:    ctx,
 		data:   data,
 		result: resChan,
 	}
 
-	// Try to submit or wait for context
 	select {
 	case ch <- j:
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 
-	// Wait for result or context
 	select {
 	case res := <-resChan:
 		return res.data, res.err

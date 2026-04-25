@@ -20,7 +20,6 @@ const bufSize = 1024 * 1024
 
 var lis *bufconn.Listener
 
-// mockProcess simulates image processing.
 func mockProcess(data []byte) ([]byte, error) {
 	time.Sleep(50 * time.Millisecond)
 	return append([]byte("processed: "), data...), nil
@@ -36,7 +35,6 @@ func init() {
 		}
 	}()
 
-	// Initialize pool for testing and mock processor
 	pool.InitPool(1)
 	pool.SetProcessFunc(mockProcess)
 }
@@ -62,7 +60,6 @@ func TestProcess_Success(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Response is nil")
 	}
-	// Note: in-memory processor will fail without libvips, so we might need to mock it if tests run without libvips.
 }
 
 func TestProcess_EmptyRequest(t *testing.T) {
@@ -96,7 +93,6 @@ func TestProcess_DeadlineExceeded(t *testing.T) {
 	defer conn.Close()
 	client := pb.NewImageProcessorClient(conn)
 
-	// Since 1ms is very short, it should time out.
 	_, err = client.Process(ctx, &pb.ProcessRequest{Data: []byte("test image data")})
 	if err == nil {
 		t.Fatal("Expected DeadlineExceeded, got nil")
