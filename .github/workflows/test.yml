@@ -30,3 +30,17 @@ jobs:
 
             - name: Test
               run: go test -v ./...
+
+    build-and-publish:
+        name: call-registry
+        needs: test
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: gatuno-manga/workflows/.github/workflows/registry.yml@main
+        with:
+            image_name: gatuno-file-processor
+            build_context: .
+            dockerfile_path: Dockerfile.prod
+            dockerfile_candidates: Dockerfile,Dockerfile.prod,docker/Dockerfile,build/Dockerfile
+            runner_labels_json: '["self-hosted","linux","x64"]'
+            build_platform: linux/amd64
+        secrets: inherit
