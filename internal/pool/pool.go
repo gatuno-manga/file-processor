@@ -3,6 +3,8 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"runtime"
 	"sync"
 
