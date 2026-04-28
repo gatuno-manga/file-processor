@@ -23,6 +23,7 @@ type minioClient interface {
 	GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (io.ReadCloser, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (info minio.UploadInfo, err error)
 	RemoveObject(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error
+	ListBuckets(ctx context.Context) ([]minio.BucketInfo, error)
 }
 
 // minioClientImpl wraps the real minio.Client.
@@ -42,6 +43,10 @@ func (m *minioClientImpl) RemoveObject(ctx context.Context, bucketName, objectNa
 	return m.client.RemoveObject(ctx, bucketName, objectName, opts)
 }
 
+func (m *minioClientImpl) ListBuckets(ctx context.Context) ([]minio.BucketInfo, error) {
+	return m.client.ListBuckets(ctx)
+}
+
 // S3Adapter implements the Storage port for S3-compatible storage.
 type S3Adapter struct {
 	client minioClient
@@ -58,6 +63,15 @@ func NewS3Adapter(endpoint, accessKey, secretKey string, useSSL bool) (*S3Adapte
 	}
 
 	return &S3Adapter{client: &minioClientImpl{client: client}}, nil
+}
+
+// Ping checks the connection to S3 by listing buckets.
+func (a *S3Adapter) Ping(ctx context.Context) error {
+	_, err := a.client.ListBuckets(ctx)
+	if err != nil {
+		return fmt.Errorf("s3 connectivity check failed: %w", err)
+	}
+	return nil
 }
 
 // Download retrieves an object from the specified bucket and key as a byte buffer.

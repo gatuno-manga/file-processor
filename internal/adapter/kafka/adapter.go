@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/luis/file-processor/internal/port"
 	"github.com/luis/file-processor/internal/processor"
@@ -15,6 +16,7 @@ import (
 type kafkaWriter interface {
 	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
 	Close() error
+	Stats() kafka.WriterStats
 }
 
 // kafkaReader defines the interface for kafka.Reader methods.
@@ -22,6 +24,7 @@ type kafkaReader interface {
 	FetchMessage(ctx context.Context) (kafka.Message, error)
 	CommitMessages(ctx context.Context, msgs ...kafka.Message) error
 	Close() error
+	Stats() kafka.ReaderStats
 }
 
 // KafkaAdapter implements both port.KafkaProducer and port.KafkaConsumer.
@@ -29,6 +32,7 @@ type KafkaAdapter struct {
 	writer    kafkaWriter
 	reader    kafkaReader
 	semaphore chan struct{}
+	brokers   []string
 }
 
 // NewKafkaAdapter creates a new KafkaAdapter.
@@ -50,6 +54,7 @@ func NewKafkaAdapter(brokers []string, groupID, inputTopic, outputTopic string, 
 		writer:    writer,
 		reader:    reader,
 		semaphore: make(chan struct{}, maxConcurrentTasks),
+		brokers:   brokers,
 	}
 }
 
@@ -132,6 +137,23 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 // IsReady returns true if both the reader and writer are initialized.
 func (a *KafkaAdapter) IsReady() bool {
 	return a.writer != nil && a.reader != nil
+}
+
+// Ping checks connectivity to Kafka brokers.
+func (a *KafkaAdapter) Ping(ctx context.Context) error {
+	dialer := &kafka.Dialer{
+		Timeout:   10 * time.Second,
+		DualStack: true,
+	}
+
+	for _, broker := range a.brokers {
+		conn, err := dialer.DialContext(ctx, "tcp", broker)
+		if err != nil {
+			return fmt.Errorf("failed to connect to kafka broker %s: %w", broker, err)
+		}
+		conn.Close()
+	}
+	return nil
 }
 
 var _ port.KafkaProducer = (*KafkaAdapter)(nil)

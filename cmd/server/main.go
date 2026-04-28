@@ -63,8 +63,19 @@ func main() {
 		slog.Error("failed to create s3 adapter", "error", err)
 		os.Exit(1)
 	}
+	if err := s3Adapter.Ping(ctx); err != nil {
+		slog.Error("failed to connect to S3", "endpoint", cfg.StorageEndpoint, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("Successfully connected to S3", "endpoint", cfg.StorageEndpoint)
 
 	kafkaAdapter := kafka.NewKafkaAdapter(cfg.KafkaBrokers, cfg.KafkaGroupID, cfg.KafkaInputTopic, cfg.KafkaOutputTopic, cfg.MaxConcurrentTasks)
+	if err := kafkaAdapter.Ping(ctx); err != nil {
+		slog.Error("failed to connect to Kafka", "brokers", cfg.KafkaBrokers, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("Successfully connected to Kafka", "brokers", cfg.KafkaBrokers)
+
 	kafkaOrchestrator := orchestrator.NewKafkaOrchestrator(s3Adapter, kafkaAdapter)
 
 	gGroup.Go(func() error {

@@ -29,6 +29,8 @@ func (m *mockKafkaWriter) Close() error {
 	return nil
 }
 
+func (m *mockKafkaWriter) Stats() kafka.WriterStats { return kafka.WriterStats{} }
+
 type mockKafkaReader struct {
 	fetchFunc  func(ctx context.Context) (kafka.Message, error)
 	commitFunc func(ctx context.Context, msgs ...kafka.Message) error
@@ -56,6 +58,8 @@ func (m *mockKafkaReader) Close() error {
 	return nil
 }
 
+func (m *mockKafkaReader) Stats() kafka.ReaderStats { return kafka.ReaderStats{} }
+
 func TestKafkaAdapter_EmitProcessingCompletedEvent(t *testing.T) {
 	mw := &mockKafkaWriter{
 		writeFunc: func(ctx context.Context, msgs ...kafka.Message) error {
@@ -81,6 +85,15 @@ func TestKafkaAdapter_EmitProcessingCompletedEvent(t *testing.T) {
 	err := adapter.EmitProcessingCompletedEvent(context.Background(), "processing/test.jpg", "books", "test.webp", metadata)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
+	}
+}
+
+func TestKafkaAdapter_Ping(t *testing.T) {
+	// Note: Testing actual dial is hard without real server, 
+	// but we can at least check it doesn't panic and handles empty brokers.
+	adapter := &KafkaAdapter{brokers: []string{}}
+	if err := adapter.Ping(context.Background()); err != nil {
+		t.Errorf("expected no error for empty brokers, got %v", err)
 	}
 }
 

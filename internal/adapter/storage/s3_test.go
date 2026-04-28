@@ -14,6 +14,7 @@ type mockMinioClient struct {
 	getObjectFunc    func(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (io.ReadCloser, error)
 	putObjectFunc    func(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (minio.UploadInfo, error)
 	removeObjectFunc func(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error
+	listBucketsFunc  func(ctx context.Context) ([]minio.BucketInfo, error)
 }
 
 func (m *mockMinioClient) GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (io.ReadCloser, error) {
@@ -35,6 +36,25 @@ func (m *mockMinioClient) RemoveObject(ctx context.Context, bucketName, objectNa
 		return m.removeObjectFunc(ctx, bucketName, objectName, opts)
 	}
 	return nil
+}
+
+func (m *mockMinioClient) ListBuckets(ctx context.Context) ([]minio.BucketInfo, error) {
+	if m.listBucketsFunc != nil {
+		return m.listBucketsFunc(ctx)
+	}
+	return nil, nil
+}
+
+func TestS3Adapter_Ping(t *testing.T) {
+	mc := &mockMinioClient{
+		listBucketsFunc: func(ctx context.Context) ([]minio.BucketInfo, error) {
+			return []minio.BucketInfo{}, nil
+		},
+	}
+	adapter := &S3Adapter{client: mc}
+	if err := adapter.Ping(context.Background()); err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
 }
 
 func TestS3Adapter_Download(t *testing.T) {
