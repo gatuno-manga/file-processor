@@ -36,12 +36,25 @@ func (o *KafkaOrchestrator) Run(ctx context.Context, consumer port.KafkaConsumer
 func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error {
 	slog.Info("processing image", "rawPath", rawPath, "targetBucket", targetBucket, "targetPath", targetPath, "isBackfill", isBackfill)
 
-	parts := strings.SplitN(rawPath, "/", 2)
+	// Sanitize rawPath: remove protocol prefix if present (e.g., https://)
+	cleanPath := rawPath
+	if idx := strings.Index(cleanPath, "://"); idx != -1 {
+		cleanPath = cleanPath[idx+3:]
+	}
+	// Remove leading slashes
+	cleanPath = strings.TrimLeft(cleanPath, "/")
+
+	parts := strings.SplitN(cleanPath, "/", 2)
 	if len(parts) < 2 {
-		return fmt.Errorf("invalid rawPath format: %s", rawPath)
+		return fmt.Errorf("invalid rawPath format (expected bucket/key): %s", rawPath)
 	}
 	rawBucket := parts[0]
 	rawKey := parts[1]
+
+	// Basic validation for bucket name (no colons, etc.)
+	if strings.Contains(rawBucket, ":") || rawBucket == "" {
+		return fmt.Errorf("invalid bucket name extracted from path: %s", rawBucket)
+	}
 
 	data, err := o.storage.Download(ctx, rawBucket, rawKey)
 	if err != nil {

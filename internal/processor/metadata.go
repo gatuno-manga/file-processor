@@ -39,6 +39,11 @@ func extractMetadata(input []byte) (*Metadata, error) {
 		return meta, fmt.Errorf("failed to decode image for advanced metadata: %w", err)
 	}
 
+	bounds := decoded.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return meta, fmt.Errorf("decoded image has invalid dimensions: %dx%d", bounds.Dx(), bounds.Dy())
+	}
+
 	// Dominant Color
 	meta.DominantColor = dominantcolor.Hex(dominantcolor.Find(decoded))
 

@@ -68,15 +68,24 @@ func InitPool(size int) {
 func worker(ch chan job) {
 	defer wg.Done()
 	for j := range ch {
-		select {
-		case <-j.ctx.Done():
-			j.result <- response{err: j.ctx.Err()}
-			continue
-		default:
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("worker panicked while processing image", "panic", r)
+					j.result <- response{err: fmt.Errorf("worker panic: %v", r)}
+				}
+			}()
 
-		res, meta, err := processFunc(j.data, processor.DefaultQuality, j.isBackfill)
-		j.result <- response{data: res, metadata: meta, err: err}
+			select {
+			case <-j.ctx.Done():
+				j.result <- response{err: j.ctx.Err()}
+				return
+			default:
+			}
+
+			res, meta, err := processFunc(j.data, processor.DefaultQuality, j.isBackfill)
+			j.result <- response{data: res, metadata: meta, err: err}
+		}()
 	}
 }
 
