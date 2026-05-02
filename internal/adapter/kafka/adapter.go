@@ -29,10 +29,12 @@ type kafkaReader interface {
 
 // KafkaAdapter implements both port.KafkaProducer and port.KafkaConsumer.
 type KafkaAdapter struct {
-	writer    kafkaWriter
-	reader    kafkaReader
-	semaphore chan struct{}
-	brokers   []string
+	writer      kafkaWriter
+	reader      kafkaReader
+	semaphore   chan struct{}
+	brokers     []string
+	inputTopic  string
+	outputTopic string
 }
 
 // NewKafkaAdapter creates a new KafkaAdapter.
@@ -51,10 +53,12 @@ func NewKafkaAdapter(brokers []string, groupID, inputTopic, outputTopic string, 
 	})
 
 	return &KafkaAdapter{
-		writer:    writer,
-		reader:    reader,
-		semaphore: make(chan struct{}, maxConcurrentTasks),
-		brokers:   brokers,
+		writer:      writer,
+		reader:      reader,
+		semaphore:   make(chan struct{}, maxConcurrentTasks),
+		brokers:     brokers,
+		inputTopic:  inputTopic,
+		outputTopic: outputTopic,
 	}
 }
 
@@ -139,8 +143,12 @@ func (a *KafkaAdapter) IsReady() bool {
 	return a.writer != nil && a.reader != nil
 }
 
-// Ping checks connectivity to Kafka brokers.
+// Ping checks connectivity to Kafka brokers and ensures topics exist.
 func (a *KafkaAdapter) Ping(ctx context.Context) error {
+	if len(a.brokers) == 0 {
+		return nil
+	}
+
 	dialer := &kafka.Dialer{
 		Timeout:   10 * time.Second,
 		DualStack: true,
@@ -153,6 +161,37 @@ func (a *KafkaAdapter) Ping(ctx context.Context) error {
 		}
 		conn.Close()
 	}
+
+	client := &kafka.Client{
+		Addr:    kafka.TCP(a.brokers...),
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.CreateTopics(ctx, &kafka.CreateTopicsRequest{
+		Topics: []kafka.TopicConfig{
+			{
+				Topic:             a.inputTopic,
+				NumPartitions:     1,
+				ReplicationFactor: 1,
+			},
+			{
+				Topic:             a.outputTopic,
+				NumPartitions:     1,
+				ReplicationFactor: 1,
+			},
+		},
+	})
+
+	if err != nil {
+		slog.Warn("could not ensure topics exist (they might already exist or broker restricts creation)", "error", err)
+	} else {
+		for topic, err := range resp.Errors {
+			if err != nil && err.Error() != "Topic with this name already exists" {
+				slog.Warn("topic creation issue", "topic", topic, "error", err)
+			}
+		}
+	}
+
 	return nil
 }
 
