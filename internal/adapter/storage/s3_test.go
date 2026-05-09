@@ -81,6 +81,7 @@ func TestS3Adapter_Download(t *testing.T) {
 
 func TestS3Adapter_Upload(t *testing.T) {
 	data := []byte("test data")
+	contentType := "image/webp"
 	mc := &mockMinioClient{
 		putObjectFunc: func(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (minio.UploadInfo, error) {
 			if bucketName != "test-bucket" || objectName != "test-key" {
@@ -88,6 +89,9 @@ func TestS3Adapter_Upload(t *testing.T) {
 			}
 			if objectSize != int64(len(data)) {
 				return minio.UploadInfo{}, fmt.Errorf("unexpected size")
+			}
+			if opts.ContentType != contentType {
+				return minio.UploadInfo{}, fmt.Errorf("expected content type %s, got %s", contentType, opts.ContentType)
 			}
 			uploaded, _ := io.ReadAll(reader)
 			if !bytes.Equal(uploaded, data) {
@@ -98,7 +102,7 @@ func TestS3Adapter_Upload(t *testing.T) {
 	}
 
 	adapter := &S3Adapter{client: mc}
-	err := adapter.Upload(context.Background(), "test-bucket", "test-key", data)
+	err := adapter.Upload(context.Background(), "test-bucket", "test-key", data, contentType)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

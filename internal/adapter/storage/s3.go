@@ -94,9 +94,9 @@ func (a *S3Adapter) Download(ctx context.Context, bucket, key string) ([]byte, e
 }
 
 // Upload stores the given data as an object in the specified bucket and key.
-func (a *S3Adapter) Upload(ctx context.Context, bucket, key string, data []byte) error {
+func (a *S3Adapter) Upload(ctx context.Context, bucket, key string, data []byte, contentType string) error {
 	_, err := a.client.PutObject(ctx, bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
-		ContentType: "image/webp",
+		ContentType: contentType,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to upload object to s3: %w", err)

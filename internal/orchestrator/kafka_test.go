@@ -11,7 +11,7 @@ import (
 
 type mockStorage struct {
 	downloadFunc func(ctx context.Context, bucket, key string) ([]byte, error)
-	uploadFunc   func(ctx context.Context, bucket, key string, data []byte) error
+	uploadFunc   func(ctx context.Context, bucket, key string, data []byte, contentType string) error
 	deleteFunc   func(ctx context.Context, bucket, key string) error
 }
 
@@ -22,9 +22,9 @@ func (m *mockStorage) Download(ctx context.Context, bucket, key string) ([]byte,
 	return nil, nil
 }
 
-func (m *mockStorage) Upload(ctx context.Context, bucket, key string, data []byte) error {
+func (m *mockStorage) Upload(ctx context.Context, bucket, key string, data []byte, contentType string) error {
 	if m.uploadFunc != nil {
-		return m.uploadFunc(ctx, bucket, key, data)
+		return m.uploadFunc(ctx, bucket, key, data, contentType)
 	}
 	return nil
 }
@@ -62,7 +62,7 @@ func TestKafkaOrchestrator_Handle(t *testing.T) {
 			}
 			return []byte("original"), nil
 		},
-		uploadFunc: func(ctx context.Context, bucket, key string, data []byte) error {
+		uploadFunc: func(ctx context.Context, bucket, key string, data []byte, contentType string) error {
 			if bucket != "books" || key != "ab/test.webp" {
 				return errors.New("unexpected upload arguments")
 			}

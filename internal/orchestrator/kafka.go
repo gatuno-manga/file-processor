@@ -75,7 +75,12 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, t
 	// The requirement says: "Go can opt for only extracting metadata and returning, without re-upload".
 	// Since ProcessLossy returns original bytes if isBackfill and already webp.
 	if !isBackfill || (targetBucket != rawBucket || targetPath != rawKey) {
-		err = o.storage.Upload(ctx, targetBucket, targetPath, processedData)
+		contentType := "image/webp"
+		if metadata != nil && metadata.MimeType != "" {
+			contentType = metadata.MimeType
+		}
+
+		err = o.storage.Upload(ctx, targetBucket, targetPath, processedData, contentType)
 		if err != nil {
 			return fmt.Errorf("failed to upload processed image to s3: %w", err)
 		}
