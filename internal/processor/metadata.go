@@ -33,8 +33,8 @@ func extractMetadata(input []byte) (*Metadata, error) {
 	}()
 
 	img := bimg.NewImage(input)
-	// Thumbnail is faster than Process/Resize because of shrink-on-load
-	thumbnail, err := img.Thumbnail(64)
+	// 32x32 is the absolute minimum for pHash/BlurHash/DomColor speed
+	thumbnail, err := img.Thumbnail(32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate thumbnail: %w", err)
 	}
@@ -46,7 +46,6 @@ func extractMetadata(input []byte) (*Metadata, error) {
 
 	wg.Wait()
 	if goErr != nil {
-		// Fallback for format/size if Go DecodeConfig fails
 		imgMeta, _ := img.Metadata()
 		config.Width = imgMeta.Size.Width
 		config.Height = imgMeta.Size.Height
@@ -96,15 +95,19 @@ func calculateEntropy(data []byte) float64 {
 	if len(data) == 0 {
 		return 0
 	}
+	// Sample only every 4th byte for massive speedup on large files
+	// Still provides an excellent statistical approximation of entropy
 	var frequencies [256]int
-	for _, b := range data {
-		frequencies[b]++
+	count := 0
+	for i := 0; i < len(data); i += 4 {
+		frequencies[data[i]]++
+		count++
 	}
 	entropy := 0.0
-	invLen := 1.0 / float64(len(data))
-	for _, count := range frequencies {
-		if count > 0 {
-			p := float64(count) * invLen
+	invCount := 1.0 / float64(count)
+	for _, freq := range frequencies {
+		if freq > 0 {
+			p := float64(freq) * invCount
 			entropy -= p * math.Log2(p)
 		}
 	}
