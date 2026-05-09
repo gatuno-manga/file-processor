@@ -111,8 +111,8 @@ func TestStabilityBenchmark(t *testing.T) {
 	if pSize <= 0 {
 		pSize = runtime.GOMAXPROCS(0)
 	}
-	pool.InitPool(pSize)
-	defer pool.Shutdown()
+	p := pool.NewWorkerPool(pSize)
+	defer p.Shutdown()
 
 	resolutions := []struct {
 		name   string
@@ -155,7 +155,7 @@ func TestStabilityBenchmark(t *testing.T) {
 					defer pCancel()
 
 					start := time.Now()
-					_, _, err := pool.Submit(pCtx, input, false)
+					_, _, err := p.Submit(pCtx, input, false)
 					elapsed := time.Since(start)
 
 					if err != nil {

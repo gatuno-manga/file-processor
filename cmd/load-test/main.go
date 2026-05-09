@@ -41,8 +41,8 @@ func main() {
 	processor.InitVips(cfg)
 	defer processor.ShutdownVips()
 
-	pool.InitPool(cfg.PoolSize)
-	defer pool.Shutdown()
+	p := pool.NewWorkerPool(cfg.PoolSize)
+	defer p.Shutdown()
 
 	const count = 100
 	fmt.Printf("Starting Load Test: 100 iterations of %s\n", filepath.Base(targetFile))
@@ -55,7 +55,7 @@ func main() {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			_, _, err := pool.Submit(context.Background(), data, false)
+			_, _, err := p.Submit(context.Background(), data, false)
 			if err != nil {
 				fmt.Printf("Iteration %d failed: %v\n", id, err)
 			}

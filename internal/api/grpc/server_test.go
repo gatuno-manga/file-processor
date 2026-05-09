@@ -19,7 +19,10 @@ import (
 
 const bufSize = 1024 * 1024
 
-var lis *bufconn.Listener
+var (
+	lis        *bufconn.Listener
+	testPool   *pool.WorkerPool
+)
 
 func mockProcess(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
 	time.Sleep(50 * time.Millisecond)
@@ -27,17 +30,17 @@ func mockProcess(data []byte, quality int, isBackfill bool) ([]byte, *processor.
 }
 
 func init() {
+	testPool = pool.NewWorkerPool(1)
+	testPool.SetProcessFunc(mockProcess)
+
 	lis = bufconn.Listen(bufSize)
 	s := grpc.NewServer()
-	pb.RegisterImageProcessorServer(s, NewServer())
+	pb.RegisterImageProcessorServer(s, NewServer(testPool))
 	go func() {
 		if err := s.Serve(lis); err != nil {
 			log.Fatalf("Server exited with error: %v", err)
 		}
 	}()
-
-	pool.InitPool(1)
-	pool.SetProcessFunc(mockProcess)
 }
 
 func bufDialer(context.Context, string) (net.Conn, error) {

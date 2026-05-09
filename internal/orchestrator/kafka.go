@@ -14,13 +14,15 @@ import (
 type KafkaOrchestrator struct {
 	storage  port.Storage
 	producer port.KafkaProducer
+	pool     *pool.WorkerPool
 }
 
 // NewKafkaOrchestrator creates a new KafkaOrchestrator.
-func NewKafkaOrchestrator(storage port.Storage, producer port.KafkaProducer) *KafkaOrchestrator {
+func NewKafkaOrchestrator(storage port.Storage, producer port.KafkaProducer, p *pool.WorkerPool) *KafkaOrchestrator {
 	return &KafkaOrchestrator{
 		storage:  storage,
 		producer: producer,
+		pool:     p,
 	}
 }
 
@@ -62,7 +64,7 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, t
 	}
 	defer o.storage.Release(data)
 
-	processedData, metadata, err := pool.Submit(ctx, data, isBackfill)
+	processedData, metadata, err := o.pool.Submit(ctx, data, isBackfill)
 	if err != nil {
 		return fmt.Errorf("failed to process image in pool: %w", err)
 	}

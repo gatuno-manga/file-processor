@@ -42,8 +42,8 @@ func generateTestImage(width, height int) ([]byte, error) {
 
 func TestLoadConcurrency(t *testing.T) {
 	cfg := processor.LoadConfig()
-	pool.InitPool(cfg.PoolSize)
-	defer pool.Shutdown()
+	p := pool.NewWorkerPool(cfg.PoolSize)
+	defer p.Shutdown()
 
 	resolutions := []struct {
 		name   string
@@ -91,7 +91,7 @@ func TestLoadConcurrency(t *testing.T) {
 							defer cancel()
 
 							individualStart := time.Now()
-							_, _, err := pool.Submit(ctx, input, false)
+							_, _, err := p.Submit(ctx, input, false)
 							elapsed := time.Since(individualStart)
 							
 							if err != nil {

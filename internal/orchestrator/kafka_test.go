@@ -50,8 +50,8 @@ func (m *mockProducer) EmitProcessingCompletedEvent(ctx context.Context, rawPath
 }
 
 func TestKafkaOrchestrator_Handle(t *testing.T) {
-	pool.InitPool(1)
-	pool.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
+	testPool := pool.NewWorkerPool(1)
+	testPool.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
 		return []byte("sanitized"), &processor.Metadata{}, nil
 	})
 
@@ -87,7 +87,7 @@ func TestKafkaOrchestrator_Handle(t *testing.T) {
 		},
 	}
 
-	o := NewKafkaOrchestrator(ms, mp)
+	o := NewKafkaOrchestrator(ms, mp, testPool)
 	err := o.Handle(context.Background(), "processing/ab/test.jpg", "books", "ab/test.webp", false)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)

@@ -15,11 +15,12 @@ import (
 // Server implements the ImageProcessor gRPC service.
 type Server struct {
 	pb.UnimplementedImageProcessorServer
+	pool *pool.WorkerPool
 }
 
 // NewServer creates a new instance of the Server.
-func NewServer() *Server {
-	return &Server{}
+func NewServer(p *pool.WorkerPool) *Server {
+	return &Server{pool: p}
 }
 
 // RegisterHealthServer registers the gRPC health service on the given server.
@@ -35,7 +36,7 @@ func (s *Server) Process(ctx context.Context, req *pb.ProcessRequest) (*pb.Proce
 		return nil, status.Error(codes.InvalidArgument, "empty request data")
 	}
 
-	res, _, err := pool.Submit(ctx, req.GetData(), false)
+	res, _, err := s.pool.Submit(ctx, req.GetData(), false)
 	if err != nil {
 		if err == context.DeadlineExceeded {
 			return nil, status.Error(codes.DeadlineExceeded, "processing deadline exceeded")

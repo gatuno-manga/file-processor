@@ -42,7 +42,8 @@ func main() {
 	defer processor.ShutdownVips()
 	slog.Info("Vips initialized successfully", "quality", cfg.WebPQuality)
 
-	pool.InitPool(cfg.PoolSize)
+	workerPool := pool.NewWorkerPool(cfg.PoolSize)
+	defer workerPool.Shutdown()
 	slog.Info("Worker pool initialized", "size", cfg.PoolSize)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -76,7 +77,7 @@ func main() {
 	}
 	slog.Info("Successfully connected to Kafka", "brokers", cfg.KafkaBrokers)
 
-	kafkaOrchestrator := orchestrator.NewKafkaOrchestrator(s3Adapter, kafkaAdapter)
+	kafkaOrchestrator := orchestrator.NewKafkaOrchestrator(s3Adapter, kafkaAdapter, workerPool)
 
 	gGroup.Go(func() error {
 		slog.Info("Starting Kafka orchestrator")
@@ -92,7 +93,7 @@ func main() {
 		fmt.Fprintln(w, "OK")
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if pool.IsReady() && kafkaAdapter.IsReady() {
+		if kafkaAdapter.IsReady() {
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprintln(w, "READY")
 		} else {
@@ -127,7 +128,7 @@ func main() {
 	}
 
 	grpcServer := g.NewServer()
-	pb.RegisterImageProcessorServer(grpcServer, grpc.NewServer())
+	pb.RegisterImageProcessorServer(grpcServer, grpc.NewServer(workerPool))
 
 	gGroup.Go(func() error {
 		slog.Info("gRPC server listening", "port", cfg.Port)
@@ -145,9 +146,6 @@ func main() {
 	if err := gGroup.Wait(); err != nil {
 		slog.Error("Gatuno execution error", "error", err)
 	}
-
-	slog.Info("Shutting down worker pool...")
-	pool.Shutdown()
 
 	slog.Info("Gatuno stopped")
 }

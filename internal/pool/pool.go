@@ -24,52 +24,53 @@ type response struct {
 	err      error
 }
 
-var (
+// WorkerPool manages a pool of workers for processing images.
+type WorkerPool struct {
 	jobChan     chan job
-	poolSize    int
-	processFunc = func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
-		return processor.ProcessLossy(data, quality, isBackfill)
-	}
-	wg sync.WaitGroup
-	mu sync.Mutex
-
-	chanPool = sync.Pool{
-		New: func() interface{} {
-			return make(chan response, 1)
-		},
-	}
-)
-
-// SetProcessFunc allows overriding the processing logic, mainly for testing.
-func SetProcessFunc(f func([]byte, int, bool) ([]byte, *processor.Metadata, error)) {
-	processFunc = f
+	processFunc func([]byte, int, bool) ([]byte, *processor.Metadata, error)
+	wg          sync.WaitGroup
+	chanPool    sync.Pool
+	mu          sync.Mutex
+	isClosed    bool
 }
 
-// InitPool initializes the worker pool with the given size.
+// NewWorkerPool initializes a new worker pool with the given size.
 // If size is <= 0, it defaults to runtime.GOMAXPROCS(0).
-func InitPool(size int) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if jobChan != nil {
-		return
-	}
-
+func NewWorkerPool(size int) *WorkerPool {
 	if size <= 0 {
 		size = runtime.GOMAXPROCS(0)
 	}
-	poolSize = size
-	jobChan = make(chan job, size)
+
+	p := &WorkerPool{
+		jobChan: make(chan job, size),
+		processFunc: func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
+			return processor.ProcessLossy(data, quality, isBackfill)
+		},
+		chanPool: sync.Pool{
+			New: func() interface{} {
+				return make(chan response, 1)
+			},
+		},
+	}
 
 	for i := 0; i < size; i++ {
-		wg.Add(1)
-		go worker(jobChan)
+		p.wg.Add(1)
+		go p.worker()
 	}
+
+	return p
 }
 
-func worker(ch chan job) {
-	defer wg.Done()
-	for j := range ch {
+// SetProcessFunc allows overriding the processing logic, mainly for testing.
+func (p *WorkerPool) SetProcessFunc(f func([]byte, int, bool) ([]byte, *processor.Metadata, error)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.processFunc = f
+}
+
+func (p *WorkerPool) worker() {
+	defer p.wg.Done()
+	for j := range p.jobChan {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -85,52 +86,41 @@ func worker(ch chan job) {
 			default:
 			}
 
-			res, meta, err := processFunc(j.data, processor.DefaultQuality, j.isBackfill)
+			p.mu.Lock()
+			f := p.processFunc
+			p.mu.Unlock()
+
+			res, meta, err := f(j.data, processor.DefaultQuality, j.isBackfill)
 			j.result <- response{data: res, metadata: meta, err: err}
 		}()
 	}
 }
 
 // Shutdown closes the job channel and waits for all workers to finish.
-func Shutdown() {
-	mu.Lock()
-	if jobChan == nil {
-		mu.Unlock()
+func (p *WorkerPool) Shutdown() {
+	p.mu.Lock()
+	if p.isClosed {
+		p.mu.Unlock()
 		return
 	}
+	p.isClosed = true
+	p.mu.Unlock()
 
-	ch := jobChan
-	jobChan = nil
-	mu.Unlock()
-
-	close(ch)
-	wg.Wait()
-}
-
-// IsReady returns true if the worker pool is initialized and active.
-func IsReady() bool {
-	mu.Lock()
-	defer mu.Unlock()
-	return jobChan != nil
-}
-
-// ResetPoolForTest shuts down the current pool and resets state for testing.
-func ResetPoolForTest() {
-	Shutdown()
+	close(p.jobChan)
+	p.wg.Wait()
 }
 
 // Submit sends a job to the worker pool and blocks until completion or context expiration.
-func Submit(ctx context.Context, data []byte, isBackfill bool) ([]byte, *processor.Metadata, error) {
-	mu.Lock()
-	ch := jobChan
-	mu.Unlock()
-
-	if ch == nil {
-		return nil, nil, errors.New("worker pool not initialized")
+func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool) ([]byte, *processor.Metadata, error) {
+	p.mu.Lock()
+	if p.isClosed {
+		p.mu.Unlock()
+		return nil, nil, errors.New("worker pool is closed")
 	}
+	p.mu.Unlock()
 
-	resChan := chanPool.Get().(chan response)
-	defer chanPool.Put(resChan)
+	resChan := p.chanPool.Get().(chan response)
+	defer p.chanPool.Put(resChan)
 
 	j := job{
 		ctx:        ctx,
@@ -140,7 +130,7 @@ func Submit(ctx context.Context, data []byte, isBackfill bool) ([]byte, *process
 	}
 
 	select {
-	case ch <- j:
+	case p.jobChan <- j:
 	case <-ctx.Done():
 		return nil, nil, ctx.Err()
 	}
