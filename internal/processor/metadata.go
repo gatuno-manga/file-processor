@@ -8,6 +8,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"math"
+	"sync"
 
 	"github.com/bbrks/go-blurhash"
 	"github.com/cenkalti/dominantcolor"
@@ -17,52 +18,76 @@ import (
 )
 
 func extractMetadata(input []byte) (*Metadata, error) {
+	var wg sync.WaitGroup
+	var entropy float64
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		entropy = calculateEntropy(input)
+	}()
+
 	img := bimg.NewImage(input)
 	imgMeta, err := img.Metadata()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image metadata: %w", err)
 	}
 
-	// Basic metadata
+	// Advanced metadata requires standard image.Image
+	// Thumbnail() is much faster as it uses shrink-on-load for JPEG/WebP.
+	// We force JPEG with low quality for the thumbnail to minimize encoding/decoding overhead.
+	thumbnail, err := img.Process(bimg.Options{
+		Width:   64,
+		Height:  64,
+		Crop:    true,
+		Type:    bimg.JPEG,
+		Quality: 10,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate thumbnail for advanced metadata: %w", err)
+	}
+
+	decoded, _, err := image.Decode(bytes.NewReader(thumbnail))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode thumbnail for advanced metadata: %w", err)
+	}
+
 	meta := &Metadata{
 		Width:        imgMeta.Size.Width,
 		Height:       imgMeta.Size.Height,
 		FormatOrigin: imgMeta.Type,
 		MimeType:     "image/" + imgMeta.Type,
-		Entropy:      calculateEntropy(input),
 	}
 
-	// Advanced metadata requires standard image.Image
-	// We create a small thumbnail using bimg first to avoid decoding large images in pure Go
-	thumbnail, err := img.Resize(32, 0)
-	if err != nil {
-		return meta, fmt.Errorf("failed to generate thumbnail for advanced metadata: %w", err)
-	}
-
-	decoded, _, err := image.Decode(bytes.NewReader(thumbnail))
-	if err != nil {
-		return meta, fmt.Errorf("failed to decode thumbnail for advanced metadata: %w", err)
-	}
-
-	bounds := decoded.Bounds()
-	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
-		return meta, fmt.Errorf("decoded thumbnail has invalid dimensions: %dx%d", bounds.Dx(), bounds.Dy())
-	}
+	var metaWg sync.WaitGroup
+	metaWg.Add(3)
 
 	// Dominant Color
-	meta.DominantColor = dominantcolor.Hex(dominantcolor.Find(decoded))
+	go func() {
+		defer metaWg.Done()
+		meta.DominantColor = dominantcolor.Hex(dominantcolor.Find(decoded))
+	}()
 
 	// pHash
-	hash, err := goimagehash.PerceptionHash(decoded)
-	if err == nil {
-		meta.PHash = hash.ToString()
-	}
+	go func() {
+		defer metaWg.Done()
+		hash, err := goimagehash.PerceptionHash(decoded)
+		if err == nil {
+			meta.PHash = hash.ToString()
+		}
+	}()
 
-	// BlurHash (Already using a small decoded image)
-	bh, err := blurhash.Encode(4, 3, decoded)
-	if err == nil {
-		meta.BlurHash = bh
-	}
+	// BlurHash
+	go func() {
+		defer metaWg.Done()
+		bh, err := blurhash.Encode(4, 3, decoded)
+		if err == nil {
+			meta.BlurHash = bh
+		}
+	}()
+
+	metaWg.Wait()
+	wg.Wait()
+	meta.Entropy = entropy
 
 	return meta, nil
 }

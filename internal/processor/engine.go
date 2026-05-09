@@ -59,62 +59,66 @@ func ProcessLossy(input []byte, quality int, isBackfill bool) ([]byte, *Metadata
 		return nil, nil, errors.New("input buffer is empty")
 	}
 
-	img := bimg.NewImage(input)
-	metadata, err := extractMetadata(input)
-	if err != nil {
-		slog.Warn("failed to extract metadata", "error", err)
+	// For backfill, we can do a fast metadata check first
+	if isBackfill {
+		img := bimg.NewImage(input)
+		imgMeta, err := img.Metadata()
+		if err == nil && imgMeta.Type == "webp" {
+			metadata, err := extractMetadata(input)
+			if err != nil {
+				slog.Warn("failed to extract metadata for backfill", "error", err)
+			} else {
+				metadata.SizeBytes = len(input)
+			}
+			return input, metadata, nil
+		}
 	}
 
-	// Logic for backfill: if already webp and isBackfill, we can skip processing if desired.
-	// However, the mandate says "optimize by extracting metadata and skipping redundant conversion".
-	// We'll still want to return the (potentially same) bytes.
-	
-	if isBackfill && metadata != nil && metadata.MimeType == "image/webp" {
-		// Just return original bytes and extracted metadata
-		metadata.SizeBytes = len(input)
-		return input, metadata, nil
+	// Entropy calculation is extremely fast (<1ms) and can be done before deciding quality
+	// but we'll include it in the concurrent metadata extraction to keep the logic clean
+	// and only do one input traversal.
+
+	type metaResult struct {
+		meta *Metadata
+		err  error
 	}
+	metaChan := make(chan metaResult, 1)
+
+	// Start metadata extraction in the background
+	go func() {
+		meta, err := extractMetadata(input)
+		metaChan <- metaResult{meta, err}
+	}()
 
 	options := bimg.Options{
 		Type:          bimg.WEBP,
 		StripMetadata: true,
 	}
 
-	if metadata != nil {
-		const maxWebPSize = 16383
-		if metadata.Width > maxWebPSize || metadata.Height > maxWebPSize {
-			slog.Warn("image exceeds WebP limits, keeping original format to avoid resizing", "width", metadata.Width, "height", metadata.Height)
-			options.Type = bimg.UNKNOWN
-		}
-	}
-
 	if quality > 0 {
 		options.Quality = quality
-		// Dynamic quality adjustment based on entropy
-		if quality == DefaultQuality && metadata != nil {
-			if metadata.Entropy < 5.0 {
-				options.Quality = 90 // Protect smooth gradients/flat areas where artifacts are visible
-			} else {
-				options.Quality = 80 // Default to 80 for normal/high entropy where masking works
-			}
-		}
 		options.Lossless = false
 	} else {
 		options.Lossless = true
 	}
 
+	// Main libvips processing
+	img := bimg.NewImage(input)
 	output, err := img.Process(options)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// Wait for metadata extraction (should be finished by now or shortly after)
+	res := <-metaChan
+	metadata := res.meta
+	if res.err != nil {
+		slog.Warn("failed to extract metadata", "error", res.err)
+	}
+
 	if metadata != nil {
 		metadata.SizeBytes = len(output)
 		metadata.MimeType = "image/webp"
-		if options.Type == bimg.UNKNOWN {
-			// If we kept original format
-			metadata.MimeType = "image/" + metadata.FormatOrigin
-		}
 	}
 
 	return output, metadata, nil
