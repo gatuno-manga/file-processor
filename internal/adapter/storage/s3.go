@@ -13,8 +13,7 @@ import (
 
 var bufferPool = sync.Pool{
 	New: func() interface{} {
-		b := make([]byte, 5*1024*1024)
-		return &b
+		return make([]byte, 5*1024*1024)
 	},
 }
 
@@ -82,16 +81,16 @@ func (a *S3Adapter) Download(ctx context.Context, bucket, key string) ([]byte, e
 	}
 	defer object.Close()
 
-	ptr := bufferPool.Get().(*[]byte)
-	buf := bytes.NewBuffer((*ptr)[:0])
+	buf := bufferPool.Get().([]byte)
+	b := bytes.NewBuffer(buf[:0])
 
-	_, err = io.Copy(buf, object)
+	_, err = io.Copy(b, object)
 	if err != nil {
-		bufferPool.Put(ptr)
+		bufferPool.Put(buf)
 		return nil, fmt.Errorf("failed to read object data: %w", err)
 	}
 
-	return buf.Bytes(), nil
+	return b.Bytes(), nil
 }
 
 // Upload stores the given data as an object in the specified bucket and key.
@@ -118,5 +117,7 @@ func (a *S3Adapter) Delete(ctx context.Context, bucket, key string) error {
 
 // Release returns the buffer to the pool.
 func (a *S3Adapter) Release(data []byte) {
-	bufferPool.Put(&data)
+	if cap(data) > 0 {
+		bufferPool.Put(data[:0])
+	}
 }

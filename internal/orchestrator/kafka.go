@@ -60,9 +60,9 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, t
 	if err != nil {
 		return fmt.Errorf("failed to download image from s3: %w", err)
 	}
+	defer o.storage.Release(data)
 
 	processedData, metadata, err := pool.Submit(ctx, data, isBackfill)
-	o.storage.Release(data)
 	if err != nil {
 		return fmt.Errorf("failed to process image in pool: %w", err)
 	}
