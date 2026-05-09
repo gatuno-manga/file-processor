@@ -1,7 +1,9 @@
 package processor
 
 import (
+	"bytes"
 	"errors"
+	"image"
 	"log/slog"
 	"time"
 
@@ -61,22 +63,17 @@ func ProcessLossy(input []byte, quality int, isBackfill bool) ([]byte, *Metadata
 
 	// For backfill, we can do a fast metadata check first
 	if isBackfill {
-		img := bimg.NewImage(input)
-		imgMeta, err := img.Metadata()
-		if err == nil && imgMeta.Type == "webp" {
+		// Use Go's DecodeConfig to avoid CGO for fast format check
+		_, format, err := image.DecodeConfig(bytes.NewReader(input))
+		if err == nil && format == "webp" {
 			metadata, err := extractMetadata(input)
-			if err != nil {
-				slog.Warn("failed to extract metadata for backfill", "error", err)
-			} else {
+			if err == nil {
 				metadata.SizeBytes = len(input)
+				metadata.MimeType = "image/webp"
+				return input, metadata, nil
 			}
-			return input, metadata, nil
 		}
 	}
-
-	// Entropy calculation is extremely fast (<1ms) and can be done before deciding quality
-	// but we'll include it in the concurrent metadata extraction to keep the logic clean
-	// and only do one input traversal.
 
 	type metaResult struct {
 		meta *Metadata
@@ -93,6 +90,7 @@ func ProcessLossy(input []byte, quality int, isBackfill bool) ([]byte, *Metadata
 	options := bimg.Options{
 		Type:          bimg.WEBP,
 		StripMetadata: true,
+		Speed:         1, // Faster encoding effort for WebP/AVIF
 	}
 
 	if quality > 0 {
@@ -109,7 +107,7 @@ func ProcessLossy(input []byte, quality int, isBackfill bool) ([]byte, *Metadata
 		return nil, nil, err
 	}
 
-	// Wait for metadata extraction (should be finished by now or shortly after)
+	// Wait for metadata extraction
 	res := <-metaChan
 	metadata := res.meta
 	if res.err != nil {

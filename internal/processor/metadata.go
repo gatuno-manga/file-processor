@@ -18,44 +18,47 @@ import (
 )
 
 func extractMetadata(input []byte) (*Metadata, error) {
+	// Parallelize entropy and basic metadata (Go side) vs thumbnail (CGO side)
 	var wg sync.WaitGroup
 	var entropy float64
+	var config image.Config
+	var format string
+	var goErr error
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		entropy = calculateEntropy(input)
+		config, format, goErr = image.DecodeConfig(bytes.NewReader(input))
 	}()
 
 	img := bimg.NewImage(input)
-	imgMeta, err := img.Metadata()
+	// Thumbnail is faster than Process/Resize because of shrink-on-load
+	thumbnail, err := img.Thumbnail(64)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get image metadata: %w", err)
-	}
-
-	// Advanced metadata requires standard image.Image
-	// Thumbnail() is much faster as it uses shrink-on-load for JPEG/WebP.
-	// We force JPEG with low quality for the thumbnail to minimize encoding/decoding overhead.
-	thumbnail, err := img.Process(bimg.Options{
-		Width:   64,
-		Height:  64,
-		Crop:    true,
-		Type:    bimg.JPEG,
-		Quality: 10,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate thumbnail for advanced metadata: %w", err)
+		return nil, fmt.Errorf("failed to generate thumbnail: %w", err)
 	}
 
 	decoded, _, err := image.Decode(bytes.NewReader(thumbnail))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode thumbnail for advanced metadata: %w", err)
+		return nil, fmt.Errorf("failed to decode thumbnail: %w", err)
+	}
+
+	wg.Wait()
+	if goErr != nil {
+		// Fallback for format/size if Go DecodeConfig fails
+		imgMeta, _ := img.Metadata()
+		config.Width = imgMeta.Size.Width
+		config.Height = imgMeta.Size.Height
+		format = imgMeta.Type
 	}
 
 	meta := &Metadata{
-		Width:        imgMeta.Size.Width,
-		Height:       imgMeta.Size.Height,
-		FormatOrigin: imgMeta.Type,
-		MimeType:     "image/" + imgMeta.Type,
+		Width:        config.Width,
+		Height:       config.Height,
+		FormatOrigin: format,
+		MimeType:     "image/" + format,
+		Entropy:      entropy,
 	}
 
 	var metaWg sync.WaitGroup
@@ -86,9 +89,6 @@ func extractMetadata(input []byte) (*Metadata, error) {
 	}()
 
 	metaWg.Wait()
-	wg.Wait()
-	meta.Entropy = entropy
-
 	return meta, nil
 }
 
@@ -101,9 +101,10 @@ func calculateEntropy(data []byte) float64 {
 		frequencies[b]++
 	}
 	entropy := 0.0
+	invLen := 1.0 / float64(len(data))
 	for _, count := range frequencies {
 		if count > 0 {
-			p := float64(count) / float64(len(data))
+			p := float64(count) * invLen
 			entropy -= p * math.Log2(p)
 		}
 	}
