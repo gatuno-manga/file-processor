@@ -8,7 +8,6 @@ require (
 	github.com/corona10/goimagehash v1.1.0
 	github.com/h2non/bimg v1.1.9
 	github.com/minio/minio-go/v7 v7.0.80
-	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/prometheus/client_golang v1.20.0
 	github.com/segmentio/kafka-go v0.4.50
 	golang.org/x/image v0.20.0
@@ -28,6 +27,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.11 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect

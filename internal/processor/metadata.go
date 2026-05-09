@@ -13,7 +13,6 @@ import (
 	"github.com/cenkalti/dominantcolor"
 	"github.com/corona10/goimagehash"
 	"github.com/h2non/bimg"
-	"github.com/nfnt/resize"
 	_ "golang.org/x/image/webp"
 )
 
@@ -34,14 +33,20 @@ func extractMetadata(input []byte) (*Metadata, error) {
 	}
 
 	// Advanced metadata requires standard image.Image
-	decoded, _, err := image.Decode(bytes.NewReader(input))
+	// We create a small thumbnail using bimg first to avoid decoding large images in pure Go
+	thumbnail, err := bimg.NewImage(input).Resize(32, 0)
 	if err != nil {
-		return meta, fmt.Errorf("failed to decode image for advanced metadata: %w", err)
+		return meta, fmt.Errorf("failed to generate thumbnail for advanced metadata: %w", err)
+	}
+
+	decoded, _, err := image.Decode(bytes.NewReader(thumbnail))
+	if err != nil {
+		return meta, fmt.Errorf("failed to decode thumbnail for advanced metadata: %w", err)
 	}
 
 	bounds := decoded.Bounds()
 	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
-		return meta, fmt.Errorf("decoded image has invalid dimensions: %dx%d", bounds.Dx(), bounds.Dy())
+		return meta, fmt.Errorf("decoded thumbnail has invalid dimensions: %dx%d", bounds.Dx(), bounds.Dy())
 	}
 
 	// Dominant Color
@@ -53,10 +58,8 @@ func extractMetadata(input []byte) (*Metadata, error) {
 		meta.PHash = hash.ToString()
 	}
 
-	// BlurHash (Downscale for performance)
-	// Recommended size for BlurHash is small
-	smallImg := resize.Resize(32, 0, decoded, resize.Bilinear)
-	bh, err := blurhash.Encode(4, 3, smallImg)
+	// BlurHash (Already using a small decoded image)
+	bh, err := blurhash.Encode(4, 3, decoded)
 	if err == nil {
 		meta.BlurHash = bh
 	}
