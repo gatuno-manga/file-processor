@@ -18,23 +18,23 @@ import (
 
 func extractMetadata(input []byte) (*Metadata, error) {
 	img := bimg.NewImage(input)
-	size, err := img.Size()
+	imgMeta, err := img.Metadata()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get image size: %w", err)
+		return nil, fmt.Errorf("failed to get image metadata: %w", err)
 	}
 
 	// Basic metadata
 	meta := &Metadata{
-		Width:        size.Width,
-		Height:       size.Height,
-		FormatOrigin: img.Type(),
-		MimeType:     "image/" + img.Type(),
+		Width:        imgMeta.Size.Width,
+		Height:       imgMeta.Size.Height,
+		FormatOrigin: imgMeta.Type,
+		MimeType:     "image/" + imgMeta.Type,
 		Entropy:      calculateEntropy(input),
 	}
 
 	// Advanced metadata requires standard image.Image
 	// We create a small thumbnail using bimg first to avoid decoding large images in pure Go
-	thumbnail, err := bimg.NewImage(input).Resize(32, 0)
+	thumbnail, err := img.Resize(32, 0)
 	if err != nil {
 		return meta, fmt.Errorf("failed to generate thumbnail for advanced metadata: %w", err)
 	}
@@ -71,14 +71,16 @@ func calculateEntropy(data []byte) float64 {
 	if len(data) == 0 {
 		return 0
 	}
-	frequencies := make(map[byte]int)
+	var frequencies [256]int
 	for _, b := range data {
 		frequencies[b]++
 	}
 	entropy := 0.0
 	for _, count := range frequencies {
-		p := float64(count) / float64(len(data))
-		entropy -= p * math.Log2(p)
+		if count > 0 {
+			p := float64(count) / float64(len(data))
+			entropy -= p * math.Log2(p)
+		}
 	}
 	return entropy
 }
