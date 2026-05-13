@@ -36,7 +36,7 @@ func (s *Server) Process(ctx context.Context, req *pb.ProcessRequest) (*pb.Proce
 		return nil, status.Error(codes.InvalidArgument, "empty request data")
 	}
 
-	res, _, err := s.pool.Submit(ctx, req.GetData(), false)
+	results, err := s.pool.Submit(ctx, req.GetData(), false)
 	if err != nil {
 		if err == context.DeadlineExceeded {
 			return nil, status.Error(codes.DeadlineExceeded, "processing deadline exceeded")
@@ -47,7 +47,11 @@ func (s *Server) Process(ctx context.Context, req *pb.ProcessRequest) (*pb.Proce
 		return nil, status.Errorf(codes.Internal, "internal processing error: %v", err)
 	}
 
+	if len(results) == 0 {
+		return nil, status.Error(codes.Internal, "no results generated")
+	}
+
 	return &pb.ProcessResponse{
-		Data: res,
+		Data: results[0].Data,
 	}, nil
 }

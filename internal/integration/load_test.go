@@ -91,7 +91,7 @@ func TestLoadConcurrency(t *testing.T) {
 							defer cancel()
 
 							individualStart := time.Now()
-							_, _, err := p.Submit(ctx, input, false)
+							_, err := p.Submit(ctx, input, false)
 							elapsed := time.Since(individualStart)
 							
 							if err != nil {

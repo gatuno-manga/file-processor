@@ -92,13 +92,20 @@ func main() {
 		}
 
 		start := time.Now()
-		processed, metadata, err := processor.ProcessLossy(data, quality, false)
+		results, err := processor.ProcessLossy(data, quality, false)
 		duration := time.Since(start).Round(time.Millisecond)
 
 		if err != nil {
 			fmt.Printf("Error processing %s: %v\n", file.Name(), err)
 			continue
 		}
+
+		if len(results) == 0 {
+			fmt.Printf("No results for %s\n", file.Name())
+			continue
+		}
+		processed := results[0].Data
+		metadata := results[0].Metadata
 
 		err = ioutil.WriteFile(outputPath, processed, 0644)
 		if err != nil {

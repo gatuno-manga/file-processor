@@ -3,6 +3,7 @@ package processor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"log/slog"
 	"time"
@@ -13,21 +14,21 @@ import (
 )
 
 var (
-	processedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	processedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "file_processor_processed_total",
-		Help: "The total number of processed images",
-	})
+		Help: "Total number of processed files",
+	}, []string{"type"})
 
-	processDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+	processDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "file_processor_duration_seconds",
-		Help:    "Duration of image processing in seconds",
+		Help:    "Duration of file processing",
 		Buckets: prometheus.DefBuckets,
-	})
+	}, []string{"type"})
 
 	DefaultQuality = 80
+	MaxHeight      = 10000
 )
 
-// Metadata contains technical data extracted from an image.
 type Metadata struct {
 	Width         int     `json:"width"`
 	Height        int     `json:"height"`
@@ -40,57 +41,48 @@ type Metadata struct {
 	Entropy       float64 `json:"entropy"`
 }
 
-// Process takes an image byte buffer and returns a metadata-stripped,
-// auto-rotated WebP byte buffer using DefaultQuality and its metadata.
-func Process(input []byte) ([]byte, *Metadata, error) {
+type ProcessedResult struct {
+	Data     []byte
+	Metadata *Metadata
+}
+
+func Process(input []byte) ([]ProcessedResult, error) {
 	return ProcessLossy(input, DefaultQuality, false)
 }
 
-// ProcessLossy takes an image byte buffer and returns a metadata-stripped,
-// auto-rotated WebP byte buffer with the specified quality (1-100) and its metadata.
-// If quality is 0, it uses lossless compression.
-// If isBackfill is true and image is already WebP, it might skip conversion.
-func ProcessLossy(input []byte, quality int, isBackfill bool) ([]byte, *Metadata, error) {
+func ProcessLossy(input []byte, quality int, isBackfill bool) ([]ProcessedResult, error) {
 	start := time.Now()
 	defer func() {
-		processedTotal.Inc()
-		processDuration.Observe(time.Since(start).Seconds())
+		processedTotal.WithLabelValues("image").Inc()
+		processDuration.WithLabelValues("image").Observe(time.Since(start).Seconds())
 	}()
 
 	if len(input) == 0 {
-		return nil, nil, errors.New("input buffer is empty")
+		return nil, errors.New("input buffer is empty")
 	}
 
-	// For backfill, we can do a fast metadata check first
-	if isBackfill {
-		// Use Go's DecodeConfig to avoid CGO for fast format check
+	img := bimg.NewImage(input)
+	size, err := img.Size()
+	if err != nil {
+		return nil, err
+	}
+
+	if isBackfill && size.Height <= MaxHeight {
 		_, format, err := image.DecodeConfig(bytes.NewReader(input))
 		if err == nil && format == "webp" {
 			metadata, err := extractMetadata(input)
 			if err == nil {
 				metadata.SizeBytes = len(input)
 				metadata.MimeType = "image/webp"
-				return input, metadata, nil
+				return []ProcessedResult{{Data: input, Metadata: metadata}}, nil
 			}
 		}
 	}
 
-	type metaResult struct {
-		meta *Metadata
-		err  error
-	}
-	metaChan := make(chan metaResult, 1)
-
-	// Start metadata extraction in the background
-	go func() {
-		meta, err := extractMetadata(input)
-		metaChan <- metaResult{meta, err}
-	}()
-
 	options := bimg.Options{
 		Type:          bimg.WEBP,
 		StripMetadata: true,
-		Speed:         1, // Faster encoding effort for WebP/AVIF
+		Speed:         1,
 	}
 
 	if quality > 0 {
@@ -100,24 +92,59 @@ func ProcessLossy(input []byte, quality int, isBackfill bool) ([]byte, *Metadata
 		options.Lossless = true
 	}
 
-	// Main libvips processing
-	img := bimg.NewImage(input)
-	output, err := img.Process(options)
-	if err != nil {
-		return nil, nil, err
+	if size.Height <= MaxHeight {
+		output, err := img.Process(options)
+		if err != nil {
+			return nil, err
+		}
+		metadata, err := extractMetadata(input)
+		if err != nil {
+			slog.Warn("failed to extract metadata", "error", err)
+		}
+		if metadata != nil {
+			metadata.SizeBytes = len(output)
+			metadata.MimeType = "image/webp"
+		}
+		return []ProcessedResult{{Data: output, Metadata: metadata}}, nil
 	}
 
-	// Wait for metadata extraction
-	res := <-metaChan
-	metadata := res.meta
-	if res.err != nil {
-		slog.Warn("failed to extract metadata", "error", res.err)
+	slog.Info("long image detected, splitting", "height", size.Height, "maxHeight", MaxHeight)
+	numParts := (size.Height + MaxHeight - 1) / MaxHeight
+	results := make([]ProcessedResult, 0, numParts)
+
+	for i := 0; i < numParts; i++ {
+		top := i * MaxHeight
+		height := MaxHeight
+		if top+height > size.Height {
+			height = size.Height - top
+		}
+
+		extractOpts := bimg.Options{
+			Top:    top,
+			Left:   0,
+			Width:  size.Width,
+			Height: height,
+		}
+		slice, err := bimg.NewImage(input).Process(extractOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract slice %d: %w", i, err)
+		}
+
+		output, err := bimg.NewImage(slice).Process(options)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process slice %d: %w", i, err)
+		}
+
+		metadata, err := extractMetadata(slice)
+		if err != nil {
+			slog.Warn("failed to extract metadata for slice", "index", i, "error", err)
+		}
+		if metadata != nil {
+			metadata.SizeBytes = len(output)
+			metadata.MimeType = "image/webp"
+		}
+		results = append(results, ProcessedResult{Data: output, Metadata: metadata})
 	}
 
-	if metadata != nil {
-		metadata.SizeBytes = len(output)
-		metadata.MimeType = "image/webp"
-	}
-
-	return output, metadata, nil
+	return results, nil
 }

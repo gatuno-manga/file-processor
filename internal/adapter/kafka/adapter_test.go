@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/luis/file-processor/internal/port"
 	"github.com/luis/file-processor/internal/processor"
 	"github.com/segmentio/kafka-go"
 )
@@ -70,11 +71,11 @@ func TestKafkaAdapter_EmitProcessingCompletedEvent(t *testing.T) {
 			if err := json.Unmarshal(msgs[0].Value, &event); err != nil {
 				return err
 			}
-			if event.RawPath != "processing/test.jpg" || event.TargetBucket != "books" || event.TargetPath != "test.webp" {
+			if event.RawPath != "processing/test.jpg" || event.TargetBucket != "books" || len(event.Results) != 1 {
 				return errors.New("unexpected event data")
 			}
-			if event.Metadata == nil || event.Metadata.MimeType != "image/webp" {
-				return errors.New("unexpected metadata")
+			if event.Results[0].TargetPath != "test.webp" || event.Results[0].Metadata == nil || event.Results[0].Metadata.MimeType != "image/webp" {
+				return errors.New("unexpected metadata or target path")
 			}
 			return nil
 		},
@@ -82,7 +83,13 @@ func TestKafkaAdapter_EmitProcessingCompletedEvent(t *testing.T) {
 
 	adapter := &KafkaAdapter{writer: mw}
 	metadata := &processor.Metadata{MimeType: "image/webp"}
-	err := adapter.EmitProcessingCompletedEvent(context.Background(), "processing/test.jpg", "books", "test.webp", metadata)
+	results := []port.ProcessingResult{
+		{
+			TargetPath: "test.webp",
+			Metadata:   metadata,
+		},
+	}
+	err := adapter.EmitProcessingCompletedEvent(context.Background(), "processing/test.jpg", "books", results)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}

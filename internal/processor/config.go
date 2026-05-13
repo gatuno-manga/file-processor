@@ -9,7 +9,6 @@ import (
 	"github.com/h2non/bimg"
 )
 
-// Config holds all configuration for the application.
 type Config struct {
 	AppEnv           string
 	Port             string
@@ -19,6 +18,8 @@ type Config struct {
 	KafkaGroupID     string
 	KafkaInputTopic  string
 	KafkaOutputTopic string
+	KafkaDocInput    string
+	KafkaDocOutput   string
 	StorageEndpoint  string
 	StorageAccessKey string
 	StorageSecretKey string
@@ -29,7 +30,6 @@ type Config struct {
 	MaxConcurrentTasks int
 }
 
-// LoadConfig reads configuration from environment variables with sensible defaults.
 func LoadConfig() *Config {
 	poolSize := getEnvInt("WORKER_POOL_SIZE", 0)
 	maxConcurrentTasks := getEnvInt("MAX_CONCURRENT_TASKS", poolSize*2)
@@ -43,10 +43,13 @@ func LoadConfig() *Config {
 		HealthPort:       getEnv("HEALTH_PORT", "8081"),
 		PoolSize:         poolSize,
 		KafkaBrokers:     strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ","),
-		KafkaGroupID:     getEnv("KAFKA_GROUP_ID", "file-processor-group"),
+		KafkaGroupID:     getEnv("KAFKA_GROUP_ID", "image-processor-go"),
 		KafkaInputTopic:  getEnv("KAFKA_TOPIC_INPUT", "image.processing.requested"),
 		KafkaOutputTopic: getEnv("KAFKA_TOPIC_OUTPUT", "image.processing.completed"),
-		StorageEndpoint:  getEnv("STORAGE_ENDPOINT", "localhost:9000"),
+		KafkaDocInput:    getEnv("KAFKA_TOPIC_DOC_INPUT", "document.processing.requested"),
+		KafkaDocOutput:   getEnv("KAFKA_TOPIC_DOC_OUTPUT", "document.processing.completed"),
+		StorageEndpoint:  getEnv("S3_ENDPOINT", "http://localhost:9000"),
+
 		StorageAccessKey: getEnv("STORAGE_ACCESS_KEY", ""),
 		StorageSecretKey: getEnv("STORAGE_SECRET_KEY", ""),
 		StorageSSL:       getEnvBool("STORAGE_SSL", false),
@@ -82,7 +85,6 @@ func getEnvBool(key string, fallback bool) bool {
 	return fallback
 }
 
-// InitVips initializes the libvips engine with specific cache limits.
 func InitVips(cfg *Config) {
 	bimg.VipsCacheSetMax(cfg.VipsMaxCache)
 	bimg.VipsCacheSetMaxMem(cfg.VipsMaxCacheMem)
@@ -90,7 +92,6 @@ func InitVips(cfg *Config) {
 	slog.Info("libvips initialized", "version", bimg.VipsVersion)
 }
 
-// ShutdownVips shuts down the libvips engine.
 func ShutdownVips() {
 	bimg.Shutdown()
 }
