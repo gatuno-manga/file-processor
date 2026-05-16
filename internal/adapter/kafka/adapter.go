@@ -78,7 +78,7 @@ func NewKafkaAdapter(brokers []string, groupID, inputTopic, outputTopic, docInpu
 	}
 }
 
-func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket string, results []port.ProcessingResult) error {
+func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath, originalUrl, targetBucket string, results []port.ProcessingResult) error {
 	eventResults := make([]ImageProcessingResult, len(results))
 	for i, res := range results {
 		eventResults[i] = ImageProcessingResult{
@@ -99,6 +99,7 @@ func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath
 
 	event := ImageProcessingCompletedEvent{
 		RawPath:      rawPath,
+		OriginalUrl:  originalUrl,
 		TargetBucket: targetBucket,
 		Results:      eventResults,
 	}
@@ -145,7 +146,7 @@ func (a *KafkaAdapter) EmitDocumentProcessingCompletedEvent(ctx context.Context,
 	return nil
 }
 
-func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error) error {
+func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error) error {
 	defer a.reader.Close()
 	defer a.writer.Close()
 
@@ -175,7 +176,7 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 		go func(m kafka.Message, e ImageProcessingRequestedEvent) {
 			defer func() { <-a.semaphore }()
 
-			if err := handler(ctx, e.RawPath, e.TargetBucket, e.TargetPath, e.IsBackfill); err != nil {
+			if err := handler(ctx, e.RawBucket, e.RawPath, e.OriginalUrl, e.TargetBucket, e.TargetPath, e.IsBackfill); err != nil {
 				slog.Error("failed to handle image processing requested event", "error", err, "rawPath", e.RawPath)
 			}
 
@@ -186,7 +187,7 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 	}
 }
 
-func (a *KafkaAdapter) ConsumeDocumentRequests(ctx context.Context, handler func(ctx context.Context, rawPath, targetBucket, targetPath, format string) error) error {
+func (a *KafkaAdapter) ConsumeDocumentRequests(ctx context.Context, handler func(ctx context.Context, rawBucket, rawPath, targetBucket, targetPath, format string) error) error {
 	defer a.docReader.Close()
 	defer a.docWriter.Close()
 
@@ -216,7 +217,7 @@ func (a *KafkaAdapter) ConsumeDocumentRequests(ctx context.Context, handler func
 		go func(m kafka.Message, e DocumentProcessingRequestedEvent) {
 			defer func() { <-a.semaphore }()
 
-			if err := handler(ctx, e.RawPath, e.TargetBucket, e.TargetPath, e.Format); err != nil {
+			if err := handler(ctx, e.RawBucket, e.RawPath, e.TargetBucket, e.TargetPath, e.Format); err != nil {
 				slog.Error("failed to handle document processing requested event", "error", err, "rawPath", e.RawPath)
 			}
 

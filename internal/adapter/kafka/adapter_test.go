@@ -71,7 +71,7 @@ func TestKafkaAdapter_EmitProcessingCompletedEvent(t *testing.T) {
 			if err := json.Unmarshal(msgs[0].Value, &event); err != nil {
 				return err
 			}
-			if event.RawPath != "processing/test.jpg" || event.TargetBucket != "books" || len(event.Results) != 1 {
+			if event.RawPath != "processing/test.jpg" || event.OriginalUrl != "https://example.com/test.jpg" || event.TargetBucket != "books" || len(event.Results) != 1 {
 				return errors.New("unexpected event data")
 			}
 			if event.Results[0].TargetPath != "test.webp" || event.Results[0].Metadata == nil || event.Results[0].Metadata.MimeType != "image/webp" {
@@ -89,7 +89,7 @@ func TestKafkaAdapter_EmitProcessingCompletedEvent(t *testing.T) {
 			Metadata:   metadata,
 		},
 	}
-	err := adapter.EmitProcessingCompletedEvent(context.Background(), "processing/test.jpg", "books", results)
+	err := adapter.EmitProcessingCompletedEvent(context.Background(), "processing/test.jpg", "https://example.com/test.jpg", "books", results)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -106,7 +106,9 @@ func TestKafkaAdapter_Ping(t *testing.T) {
 
 func TestKafkaAdapter_Consume(t *testing.T) {
 	event := ImageProcessingRequestedEvent{
-		RawPath:      "processing/test.jpg",
+		RawBucket:    "processing",
+		RawPath:      "test.jpg",
+		OriginalUrl:  "https://example.com/test.jpg",
 		TargetBucket: "books",
 		TargetPath:   "test.webp",
 		IsBackfill:   true,
@@ -139,8 +141,8 @@ func TestKafkaAdapter_Consume(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var handled bool
-	handler := func(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error {
-		if rawPath == "processing/test.jpg" && targetBucket == "books" && targetPath == "test.webp" && isBackfill {
+	handler := func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
+		if rawBucket == "processing" && rawPath == "test.jpg" && originalUrl == "https://example.com/test.jpg" && targetBucket == "books" && targetPath == "test.webp" && isBackfill {
 			handled = true
 		}
 		cancel()

@@ -27,13 +27,13 @@ func NewKafkaOrchestrator(storage port.Storage, producer port.KafkaProducer, p *
 
 func (o *KafkaOrchestrator) Run(ctx context.Context, consumer port.KafkaConsumer) error {
 	slog.Info("Kafka orchestrator starting...")
-	return consumer.Consume(ctx, func(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error {
-		return o.Handle(ctx, rawPath, targetBucket, targetPath, isBackfill)
+	return consumer.Consume(ctx, func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
+		return o.Handle(ctx, rawBucket, rawPath, originalUrl, targetBucket, targetPath, isBackfill)
 	})
 }
 
-func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error {
-	slog.Info("processing image", "rawPath", rawPath, "targetBucket", targetBucket, "targetPath", targetPath, "isBackfill", isBackfill)
+func (o *KafkaOrchestrator) Handle(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
+	slog.Info("processing image", "rawBucket", rawBucket, "rawPath", rawPath, "originalUrl", originalUrl, "targetBucket", targetBucket, "targetPath", targetPath, "isBackfill", isBackfill)
 
 	cleanPath := rawPath
 	if idx := strings.Index(cleanPath, "://"); idx != -1 {
@@ -41,18 +41,30 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, t
 	}
 	cleanPath = strings.TrimLeft(cleanPath, "/")
 
-	parts := strings.SplitN(cleanPath, "/", 2)
-	if len(parts) < 2 {
-		return fmt.Errorf("invalid rawPath format (expected bucket/key): %s", rawPath)
-	}
-	rawBucket := parts[0]
-	rawKey := parts[1]
+	finalBucket := rawBucket
+	finalKey := cleanPath
 
-	if strings.Contains(rawBucket, ":") || rawBucket == "" {
-		return fmt.Errorf("invalid bucket name extracted from path: %s", rawBucket)
+	// If bucket is explicitly provided, and the path starts with "bucket/", trim it
+	// to avoid redundant paths like bucket/bucket/key
+	if finalBucket != "" && strings.HasPrefix(finalKey, finalBucket+"/") {
+		finalKey = finalKey[len(finalBucket)+1:]
 	}
 
-	data, err := o.storage.Download(ctx, rawBucket, rawKey)
+	// Fallback for backward compatibility where rawPath might be "bucket/key"
+	if finalBucket == "" {
+		parts := strings.SplitN(cleanPath, "/", 2)
+		if len(parts) < 2 {
+			return fmt.Errorf("invalid rawPath format (expected bucket/key): %s", rawPath)
+		}
+		finalBucket = parts[0]
+		finalKey = parts[1]
+	}
+
+	if strings.Contains(finalBucket, ":") || finalBucket == "" {
+		return fmt.Errorf("invalid bucket name: %s", finalBucket)
+	}
+
+	data, err := o.storage.Download(ctx, finalBucket, finalKey)
 	if err != nil {
 		return fmt.Errorf("failed to download image from s3: %w", err)
 	}
@@ -64,7 +76,7 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, t
 	}
 
 	processingResults := make([]port.ProcessingResult, len(results))
-	g, ctx := errgroup.WithContext(ctx)
+	g, groupCtx := errgroup.WithContext(ctx)
 
 	for i, res := range results {
 		i, res := i, res
@@ -79,13 +91,13 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, t
 				}
 			}
 
-			if !isBackfill || (targetBucket != rawBucket || currentPath != rawKey) {
+			if !isBackfill || (targetBucket != finalBucket || currentPath != finalKey) {
 				contentType := "image/webp"
 				if res.Metadata != nil && res.Metadata.MimeType != "" {
 					contentType = res.Metadata.MimeType
 				}
 
-				if err := o.storage.Upload(ctx, targetBucket, currentPath, res.Data, contentType); err != nil {
+				if err := o.storage.Upload(groupCtx, targetBucket, currentPath, res.Data, contentType); err != nil {
 					return fmt.Errorf("failed to upload processed image part %d to s3: %w", i+1, err)
 				}
 			}
@@ -103,12 +115,12 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawPath, targetBucket, t
 	}
 
 	if !isBackfill {
-		if err := o.storage.Delete(ctx, rawBucket, rawKey); err != nil {
-			slog.Warn("failed to delete original image from s3", "error", err, "bucket", rawBucket, "key", rawKey)
+		if err := o.storage.Delete(ctx, finalBucket, finalKey); err != nil {
+			slog.Warn("failed to delete original image from s3", "error", err, "bucket", finalBucket, "key", finalKey)
 		}
 	}
 
-	if err := o.producer.EmitProcessingCompletedEvent(ctx, rawPath, targetBucket, processingResults); err != nil {
+	if err := o.producer.EmitProcessingCompletedEvent(ctx, rawPath, originalUrl, targetBucket, processingResults); err != nil {
 		return fmt.Errorf("failed to emit processing completed event to kafka: %w", err)
 	}
 

@@ -2,7 +2,9 @@ package kafka
 
 // ImageProcessingRequestedEvent represents the payload from the image.processing.requested topic.
 type ImageProcessingRequestedEvent struct {
+	RawBucket    string `json:"rawBucket"`
 	RawPath      string `json:"rawPath"`
+	OriginalUrl  string `json:"originalUrl"`
 	TargetBucket string `json:"targetBucket"`
 	TargetPath   string `json:"targetPath"`
 	IsBackfill   bool   `json:"isBackfill"`
@@ -10,8 +12,9 @@ type ImageProcessingRequestedEvent struct {
 
 // ImageProcessingCompletedEvent represents the payload sent to the image.processing.completed topic.
 type ImageProcessingCompletedEvent struct {
-	RawPath      string                    `json:"rawPath"`
-	TargetBucket string                    `json:"targetBucket"`
+	RawPath      string                  `json:"rawPath"`
+	OriginalUrl  string                  `json:"originalUrl"`
+	TargetBucket string                  `json:"targetBucket"`
 	Results      []ImageProcessingResult `json:"results"`
 }
 
@@ -34,6 +37,7 @@ type MetadataEventField struct {
 
 // DocumentProcessingRequestedEvent represents the payload from the document.processing.requested topic.
 type DocumentProcessingRequestedEvent struct {
+	RawBucket    string `json:"rawBucket"`
 	RawPath      string `json:"rawPath"`
 	TargetBucket string `json:"targetBucket"`
 	TargetPath   string `json:"targetPath"`

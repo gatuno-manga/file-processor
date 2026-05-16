@@ -40,12 +40,12 @@ func (m *mockStorage) Delete(ctx context.Context, bucket, key string) error {
 func (m *mockStorage) Release(data []byte) {}
 
 type mockProducer struct {
-	emitFunc func(ctx context.Context, rawPath, targetBucket string, results []port.ProcessingResult) error
+	emitFunc func(ctx context.Context, rawPath, originalUrl, targetBucket string, results []port.ProcessingResult) error
 }
 
-func (m *mockProducer) EmitProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket string, results []port.ProcessingResult) error {
+func (m *mockProducer) EmitProcessingCompletedEvent(ctx context.Context, rawPath, originalUrl, targetBucket string, results []port.ProcessingResult) error {
 	if m.emitFunc != nil {
-		return m.emitFunc(ctx, rawPath, targetBucket, results)
+		return m.emitFunc(ctx, rawPath, originalUrl, targetBucket, results)
 	}
 	return nil
 }
@@ -84,8 +84,8 @@ func TestKafkaOrchestrator_Handle(t *testing.T) {
 		},
 	}
 	mp := &mockProducer{
-		emitFunc: func(ctx context.Context, rawPath, targetBucket string, results []port.ProcessingResult) error {
-			if rawPath != "processing/ab/test.jpg" || targetBucket != "books" || len(results) != 1 || results[0].TargetPath != "ab/test.webp" {
+		emitFunc: func(ctx context.Context, rawPath, originalUrl, targetBucket string, results []port.ProcessingResult) error {
+			if rawPath != "ab/test.jpg" || originalUrl != "https://example.com/test.jpg" || targetBucket != "books" || len(results) != 1 || results[0].TargetPath != "ab/test.webp" {
 				return errors.New("unexpected event emitted")
 			}
 			return nil
@@ -93,7 +93,7 @@ func TestKafkaOrchestrator_Handle(t *testing.T) {
 	}
 
 	o := NewKafkaOrchestrator(ms, mp, testPool)
-	err := o.Handle(context.Background(), "processing/ab/test.jpg", "books", "ab/test.webp", false)
+	err := o.Handle(context.Background(), "processing", "ab/test.jpg", "https://example.com/test.jpg", "books", "ab/test.webp", false)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}

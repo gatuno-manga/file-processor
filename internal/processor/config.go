@@ -48,7 +48,7 @@ func LoadConfig() *Config {
 		KafkaOutputTopic: getEnv("KAFKA_TOPIC_OUTPUT", "image.processing.completed"),
 		KafkaDocInput:    getEnv("KAFKA_TOPIC_DOC_INPUT", "document.processing.requested"),
 		KafkaDocOutput:   getEnv("KAFKA_TOPIC_DOC_OUTPUT", "document.processing.completed"),
-		StorageEndpoint:  getEnv("S3_ENDPOINT", "http://localhost:9000"),
+		StorageEndpoint:  getEnv("STORAGE_ENDPOINT", "localhost:9000"),
 
 		StorageAccessKey: getEnv("STORAGE_ACCESS_KEY", ""),
 		StorageSecretKey: getEnv("STORAGE_SECRET_KEY", ""),
