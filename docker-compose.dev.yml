@@ -1,5 +1,7 @@
+name: gatuno
+
 services:
-  gatuno-processor-dev:
+  file-processor:
     build:
       context: .
       dockerfile: Dockerfile.dev
