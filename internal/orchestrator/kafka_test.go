@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/luis/file-processor/internal/pool"
+	"github.com/luis/file-processor/internal/port"
 	"github.com/luis/file-processor/internal/processor"
 )
 
@@ -39,20 +40,24 @@ func (m *mockStorage) Delete(ctx context.Context, bucket, key string) error {
 func (m *mockStorage) Release(data []byte) {}
 
 type mockProducer struct {
-	emitFunc func(ctx context.Context, rawPath, targetBucket, targetPath string, metadata *processor.Metadata) error
+	emitFunc func(ctx context.Context, rawPath, originalUrl, targetBucket string, results []port.ProcessingResult) error
 }
 
-func (m *mockProducer) EmitProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket, targetPath string, metadata *processor.Metadata) error {
+func (m *mockProducer) EmitProcessingCompletedEvent(ctx context.Context, rawPath, originalUrl, targetBucket string, results []port.ProcessingResult) error {
 	if m.emitFunc != nil {
-		return m.emitFunc(ctx, rawPath, targetBucket, targetPath, metadata)
+		return m.emitFunc(ctx, rawPath, originalUrl, targetBucket, results)
 	}
+	return nil
+}
+
+func (m *mockProducer) EmitDocumentProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket, targetPath string, metadata *port.DocumentMetadata) error {
 	return nil
 }
 
 func TestKafkaOrchestrator_Handle(t *testing.T) {
 	testPool := pool.NewWorkerPool(1)
-	testPool.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
-		return []byte("sanitized"), &processor.Metadata{}, nil
+	testPool.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
+		return []processor.ProcessedResult{{Data: []byte("sanitized"), Metadata: &processor.Metadata{}}}, nil
 	})
 
 	ms := &mockStorage{
@@ -79,8 +84,8 @@ func TestKafkaOrchestrator_Handle(t *testing.T) {
 		},
 	}
 	mp := &mockProducer{
-		emitFunc: func(ctx context.Context, rawPath, targetBucket, targetPath string, metadata *processor.Metadata) error {
-			if rawPath != "processing/ab/test.jpg" || targetBucket != "books" || targetPath != "ab/test.webp" {
+		emitFunc: func(ctx context.Context, rawPath, originalUrl, targetBucket string, results []port.ProcessingResult) error {
+			if rawPath != "ab/test.jpg" || originalUrl != "https://example.com/test.jpg" || targetBucket != "books" || len(results) != 1 || results[0].TargetPath != "ab/test.webp" {
 				return errors.New("unexpected event emitted")
 			}
 			return nil
@@ -88,7 +93,7 @@ func TestKafkaOrchestrator_Handle(t *testing.T) {
 	}
 
 	o := NewKafkaOrchestrator(ms, mp, testPool)
-	err := o.Handle(context.Background(), "processing/ab/test.jpg", "books", "ab/test.webp", false)
+	err := o.Handle(context.Background(), "processing", "ab/test.jpg", "https://example.com/test.jpg", "books", "ab/test.webp", false)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}

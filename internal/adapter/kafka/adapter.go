@@ -8,18 +8,15 @@ import (
 	"time"
 
 	"github.com/luis/file-processor/internal/port"
-	"github.com/luis/file-processor/internal/processor"
 	"github.com/segmentio/kafka-go"
 )
 
-// kafkaWriter defines the interface for kafka.Writer methods.
 type kafkaWriter interface {
 	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
 	Close() error
 	Stats() kafka.WriterStats
 }
 
-// kafkaReader defines the interface for kafka.Reader methods.
 type kafkaReader interface {
 	FetchMessage(ctx context.Context) (kafka.Message, error)
 	CommitMessages(ctx context.Context, msgs ...kafka.Message) error
@@ -27,18 +24,20 @@ type kafkaReader interface {
 	Stats() kafka.ReaderStats
 }
 
-// KafkaAdapter implements both port.KafkaProducer and port.KafkaConsumer.
 type KafkaAdapter struct {
 	writer      kafkaWriter
 	reader      kafkaReader
+	docWriter   kafkaWriter
+	docReader   kafkaReader
 	semaphore   chan struct{}
 	brokers     []string
 	inputTopic  string
 	outputTopic string
+	docInput    string
+	docOutput   string
 }
 
-// NewKafkaAdapter creates a new KafkaAdapter.
-func NewKafkaAdapter(brokers []string, groupID, inputTopic, outputTopic string, maxConcurrentTasks int) *KafkaAdapter {
+func NewKafkaAdapter(brokers []string, groupID, inputTopic, outputTopic, docInput, docOutput string, maxConcurrentTasks int) *KafkaAdapter {
 	writer := &kafka.Writer{
 		Addr:     kafka.TCP(brokers...),
 		Topic:    outputTopic,
@@ -52,33 +51,57 @@ func NewKafkaAdapter(brokers []string, groupID, inputTopic, outputTopic string, 
 		StartOffset: kafka.FirstOffset,
 	})
 
+	docWriter := &kafka.Writer{
+		Addr:     kafka.TCP(brokers...),
+		Topic:    docOutput,
+		Balancer: &kafka.LeastBytes{},
+	}
+
+	docReader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:     brokers,
+		Topic:       docInput,
+		GroupID:     groupID,
+		StartOffset: kafka.FirstOffset,
+	})
+
 	return &KafkaAdapter{
 		writer:      writer,
 		reader:      reader,
+		docWriter:   docWriter,
+		docReader:   docReader,
 		semaphore:   make(chan struct{}, maxConcurrentTasks),
 		brokers:     brokers,
 		inputTopic:  inputTopic,
 		outputTopic: outputTopic,
+		docInput:    docInput,
+		docOutput:   docOutput,
 	}
 }
 
-// EmitProcessingCompletedEvent sends a message indicating image processing is complete.
-func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket, targetPath string, metadata *processor.Metadata) error {
+func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath, originalUrl, targetBucket string, results []port.ProcessingResult) error {
+	eventResults := make([]ImageProcessingResult, len(results))
+	for i, res := range results {
+		eventResults[i] = ImageProcessingResult{
+			TargetPath: res.TargetPath,
+			Metadata: &MetadataEventField{
+				Width:         res.Metadata.Width,
+				Height:        res.Metadata.Height,
+				SizeBytes:     res.Metadata.SizeBytes,
+				MimeType:      res.Metadata.MimeType,
+				FormatOrigin:  res.Metadata.FormatOrigin,
+				BlurHash:      res.Metadata.BlurHash,
+				DominantColor: res.Metadata.DominantColor,
+				PHash:         res.Metadata.PHash,
+				Entropy:       res.Metadata.Entropy,
+			},
+		}
+	}
+
 	event := ImageProcessingCompletedEvent{
 		RawPath:      rawPath,
+		OriginalUrl:  originalUrl,
 		TargetBucket: targetBucket,
-		TargetPath:   targetPath,
-		Metadata: &MetadataEventField{
-			Width:         metadata.Width,
-			Height:        metadata.Height,
-			SizeBytes:     metadata.SizeBytes,
-			MimeType:      metadata.MimeType,
-			FormatOrigin:  metadata.FormatOrigin,
-			BlurHash:      metadata.BlurHash,
-			DominantColor: metadata.DominantColor,
-			PHash:         metadata.PHash,
-			Entropy:       metadata.Entropy,
-		},
+		Results:      eventResults,
 	}
 
 	payload, err := json.Marshal(event)
@@ -96,8 +119,34 @@ func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath
 	return nil
 }
 
-// Consume starts listening for messages and processes them.
-func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, rawPath, targetBucket, targetPath string, isBackfill bool) error) error {
+func (a *KafkaAdapter) EmitDocumentProcessingCompletedEvent(ctx context.Context, rawPath, targetBucket, targetPath string, metadata *port.DocumentMetadata) error {
+	event := DocumentProcessingCompletedEvent{
+		RawPath:      rawPath,
+		TargetBucket: targetBucket,
+		TargetPath:   targetPath,
+		Metadata: &DocumentMetadata{
+			SizeBytes:    metadata.SizeBytes,
+			PageCount:    metadata.PageCount,
+			IsLinearized: metadata.IsLinearized,
+		},
+	}
+
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal document processing completed event: %w", err)
+	}
+
+	err = a.docWriter.WriteMessages(ctx, kafka.Message{
+		Value: payload,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to write document message to kafka: %w", err)
+	}
+
+	return nil
+}
+
+func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error) error {
 	defer a.reader.Close()
 	defer a.writer.Close()
 
@@ -127,7 +176,7 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 		go func(m kafka.Message, e ImageProcessingRequestedEvent) {
 			defer func() { <-a.semaphore }()
 
-			if err := handler(ctx, e.RawPath, e.TargetBucket, e.TargetPath, e.IsBackfill); err != nil {
+			if err := handler(ctx, e.RawBucket, e.RawPath, e.OriginalUrl, e.TargetBucket, e.TargetPath, e.IsBackfill); err != nil {
 				slog.Error("failed to handle image processing requested event", "error", err, "rawPath", e.RawPath)
 			}
 
@@ -138,12 +187,51 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 	}
 }
 
-// IsReady returns true if both the reader and writer are initialized.
-func (a *KafkaAdapter) IsReady() bool {
-	return a.writer != nil && a.reader != nil
+func (a *KafkaAdapter) ConsumeDocumentRequests(ctx context.Context, handler func(ctx context.Context, rawBucket, rawPath, targetBucket, targetPath, format string) error) error {
+	defer a.docReader.Close()
+	defer a.docWriter.Close()
+
+	for {
+		msg, err := a.docReader.FetchMessage(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			slog.Error("failed to fetch document message from kafka", "error", err)
+			continue
+		}
+
+		var event DocumentProcessingRequestedEvent
+		if err := json.Unmarshal(msg.Value, &event); err != nil {
+			slog.Error("failed to unmarshal document processing requested event", "error", err)
+			a.docReader.CommitMessages(ctx, msg)
+			continue
+		}
+
+		select {
+		case a.semaphore <- struct{}{}:
+		case <-ctx.Done():
+			return nil
+		}
+
+		go func(m kafka.Message, e DocumentProcessingRequestedEvent) {
+			defer func() { <-a.semaphore }()
+
+			if err := handler(ctx, e.RawBucket, e.RawPath, e.TargetBucket, e.TargetPath, e.Format); err != nil {
+				slog.Error("failed to handle document processing requested event", "error", err, "rawPath", e.RawPath)
+			}
+
+			if err := a.docReader.CommitMessages(ctx, m); err != nil {
+				slog.Error("failed to commit document message to kafka", "error", err)
+			}
+		}(msg, event)
+	}
 }
 
-// Ping checks connectivity to Kafka brokers and ensures topics exist.
+func (a *KafkaAdapter) IsReady() bool {
+	return a.writer != nil && a.reader != nil && a.docWriter != nil && a.docReader != nil
+}
+
 func (a *KafkaAdapter) Ping(ctx context.Context) error {
 	if len(a.brokers) == 0 {
 		return nil
@@ -176,6 +264,16 @@ func (a *KafkaAdapter) Ping(ctx context.Context) error {
 			},
 			{
 				Topic:             a.outputTopic,
+				NumPartitions:     1,
+				ReplicationFactor: 1,
+			},
+			{
+				Topic:             a.docInput,
+				NumPartitions:     1,
+				ReplicationFactor: 1,
+			},
+			{
+				Topic:             a.docOutput,
 				NumPartitions:     1,
 				ReplicationFactor: 1,
 			},

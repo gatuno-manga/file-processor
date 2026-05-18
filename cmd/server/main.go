@@ -35,16 +35,13 @@ func main() {
 	slog.SetDefault(logger)
 
 	slog.Info("Gatuno File Processor starting...", "env", cfg.AppEnv)
-	slog.Info("Hot Reload Test: Air is working perfectly! 🚀")
 
 	processor.InitVips(cfg)
 	processor.DefaultQuality = cfg.WebPQuality
 	defer processor.ShutdownVips()
-	slog.Info("Vips initialized successfully", "quality", cfg.WebPQuality)
 
 	workerPool := pool.NewWorkerPool(cfg.PoolSize)
 	defer workerPool.Shutdown()
-	slog.Info("Worker pool initialized", "size", cfg.PoolSize)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -53,7 +50,6 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-stop
-		slog.Info("Shutdown signal received...")
 		cancel()
 	}()
 
@@ -68,21 +64,26 @@ func main() {
 		slog.Error("failed to connect to S3", "endpoint", cfg.StorageEndpoint, "error", err)
 		os.Exit(1)
 	}
-	slog.Info("Successfully connected to S3", "endpoint", cfg.StorageEndpoint)
 
-	kafkaAdapter := kafka.NewKafkaAdapter(cfg.KafkaBrokers, cfg.KafkaGroupID, cfg.KafkaInputTopic, cfg.KafkaOutputTopic, cfg.MaxConcurrentTasks)
+	kafkaAdapter := kafka.NewKafkaAdapter(cfg.KafkaBrokers, cfg.KafkaGroupID, cfg.KafkaInputTopic, cfg.KafkaOutputTopic, cfg.KafkaDocInput, cfg.KafkaDocOutput, cfg.MaxConcurrentTasks)
 	if err := kafkaAdapter.Ping(ctx); err != nil {
 		slog.Error("failed to connect to Kafka", "brokers", cfg.KafkaBrokers, "error", err)
 		os.Exit(1)
 	}
-	slog.Info("Successfully connected to Kafka", "brokers", cfg.KafkaBrokers)
 
 	kafkaOrchestrator := orchestrator.NewKafkaOrchestrator(s3Adapter, kafkaAdapter, workerPool)
+	docOrchestrator := orchestrator.NewDocumentOrchestrator(s3Adapter, kafkaAdapter)
 
 	gGroup.Go(func() error {
-		slog.Info("Starting Kafka orchestrator")
 		if err := kafkaOrchestrator.Run(ctx, kafkaAdapter); err != nil {
 			return fmt.Errorf("kafka orchestrator error: %w", err)
+		}
+		return nil
+	})
+
+	gGroup.Go(func() error {
+		if err := docOrchestrator.Run(ctx, kafkaAdapter); err != nil {
+			return fmt.Errorf("document orchestrator error: %w", err)
 		}
 		return nil
 	})
@@ -109,10 +110,8 @@ func main() {
 	}
 
 	gGroup.Go(func() error {
-		slog.Info("Health server listening", "port", cfg.HealthPort)
 		go func() {
 			<-ctx.Done()
-			slog.Info("Shutting down health server...")
 			healthServer.Shutdown(context.Background())
 		}()
 		if err := healthServer.ListenAndServe(); err != http.ErrServerClosed {
@@ -123,7 +122,6 @@ func main() {
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", cfg.Port))
 	if err != nil {
-		slog.Error("failed to listen on port", "port", cfg.Port, "error", err)
 		os.Exit(1)
 	}
 
@@ -131,10 +129,8 @@ func main() {
 	pb.RegisterImageProcessorServer(grpcServer, grpc.NewServer(workerPool))
 
 	gGroup.Go(func() error {
-		slog.Info("gRPC server listening", "port", cfg.Port)
 		go func() {
 			<-ctx.Done()
-			slog.Info("Shutting down gRPC server...")
 			grpcServer.GracefulStop()
 		}()
 		if err := grpcServer.Serve(lis); err != nil && err != g.ErrServerStopped {

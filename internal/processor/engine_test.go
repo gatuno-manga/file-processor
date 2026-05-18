@@ -16,10 +16,17 @@ func TestProcess(t *testing.T) {
 		t.Fatalf("Failed to decode base64 GIF: %v", err)
 	}
 
-	output, metadata, err := Process(input)
+	results, err := Process(input)
 	if err != nil {
 		t.Fatalf("Process failed: %v", err)
 	}
+
+	if len(results) == 0 {
+		t.Fatal("Results are empty")
+	}
+
+	output := results[0].Data
+	metadata := results[0].Metadata
 
 	if len(output) == 0 {
 		t.Fatal("Output buffer is empty")
@@ -35,7 +42,7 @@ func TestProcess(t *testing.T) {
 }
 
 func TestProcess_EmptyInput(t *testing.T) {
-	_, _, err := Process(nil)
+	_, err := Process(nil)
 	if err == nil {
 		t.Fatal("Expected error for nil input, but got none")
 	}

@@ -55,7 +55,7 @@ func main() {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			_, _, err := p.Submit(context.Background(), data, false)
+			_, err := p.Submit(context.Background(), data, false)
 			if err != nil {
 				fmt.Printf("Iteration %d failed: %v\n", id, err)
 			}

@@ -24,9 +24,14 @@ var (
 	testPool   *pool.WorkerPool
 )
 
-func mockProcess(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
+func mockProcess(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
 	time.Sleep(50 * time.Millisecond)
-	return append([]byte("processed: "), data...), &processor.Metadata{SizeBytes: len(data) + 11}, nil
+	return []processor.ProcessedResult{
+		{
+			Data:     append([]byte("processed: "), data...),
+			Metadata: &processor.Metadata{SizeBytes: len(data) + 11},
+		},
+	}, nil
 }
 
 func init() {

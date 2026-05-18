@@ -19,23 +19,19 @@ type job struct {
 }
 
 type response struct {
-	data     []byte
-	metadata *processor.Metadata
-	err      error
+	results []processor.ProcessedResult
+	err     error
 }
 
-// WorkerPool manages a pool of workers for processing images.
 type WorkerPool struct {
 	jobChan     chan job
-	processFunc func([]byte, int, bool) ([]byte, *processor.Metadata, error)
+	processFunc func([]byte, int, bool) ([]processor.ProcessedResult, error)
 	wg          sync.WaitGroup
 	chanPool    sync.Pool
 	mu          sync.Mutex
 	isClosed    bool
 }
 
-// NewWorkerPool initializes a new worker pool with the given size.
-// If size is <= 0, it defaults to runtime.GOMAXPROCS(0).
 func NewWorkerPool(size int) *WorkerPool {
 	if size <= 0 {
 		size = runtime.GOMAXPROCS(0)
@@ -43,7 +39,7 @@ func NewWorkerPool(size int) *WorkerPool {
 
 	p := &WorkerPool{
 		jobChan: make(chan job, size),
-		processFunc: func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
+		processFunc: func(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
 			return processor.ProcessLossy(data, quality, isBackfill)
 		},
 		chanPool: sync.Pool{
@@ -61,8 +57,7 @@ func NewWorkerPool(size int) *WorkerPool {
 	return p
 }
 
-// SetProcessFunc allows overriding the processing logic, mainly for testing.
-func (p *WorkerPool) SetProcessFunc(f func([]byte, int, bool) ([]byte, *processor.Metadata, error)) {
+func (p *WorkerPool) SetProcessFunc(f func([]byte, int, bool) ([]processor.ProcessedResult, error)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.processFunc = f
@@ -90,13 +85,12 @@ func (p *WorkerPool) worker() {
 			f := p.processFunc
 			p.mu.Unlock()
 
-			res, meta, err := f(j.data, processor.DefaultQuality, j.isBackfill)
-			j.result <- response{data: res, metadata: meta, err: err}
+			res, err := f(j.data, processor.DefaultQuality, j.isBackfill)
+			j.result <- response{results: res, err: err}
 		}()
 	}
 }
 
-// Shutdown closes the job channel and waits for all workers to finish.
 func (p *WorkerPool) Shutdown() {
 	p.mu.Lock()
 	if p.isClosed {
@@ -110,12 +104,11 @@ func (p *WorkerPool) Shutdown() {
 	p.wg.Wait()
 }
 
-// Submit sends a job to the worker pool and blocks until completion or context expiration.
-func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool) ([]byte, *processor.Metadata, error) {
+func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool) ([]processor.ProcessedResult, error) {
 	p.mu.Lock()
 	if p.isClosed {
 		p.mu.Unlock()
-		return nil, nil, errors.New("worker pool is closed")
+		return nil, errors.New("worker pool is closed")
 	}
 	p.mu.Unlock()
 
@@ -132,13 +125,13 @@ func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool) (
 	select {
 	case p.jobChan <- j:
 	case <-ctx.Done():
-		return nil, nil, ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	select {
 	case res := <-resChan:
-		return res.data, res.metadata, res.err
+		return res.results, res.err
 	case <-ctx.Done():
-		return nil, nil, ctx.Err()
+		return nil, ctx.Err()
 	}
 }

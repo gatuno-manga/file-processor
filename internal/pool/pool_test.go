@@ -22,32 +22,32 @@ func TestNewWorkerPool(t *testing.T) {
 
 func TestSubmit_Success(t *testing.T) {
 	p := NewWorkerPool(1)
-	p.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
-		return []byte("processed"), &processor.Metadata{}, nil
+	p.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
+		return []processor.ProcessedResult{{Data: []byte("processed"), Metadata: &processor.Metadata{}}}, nil
 	})
 	defer p.Shutdown()
 
-	res, _, err := p.Submit(context.Background(), []byte("input"), false)
+	results, err := p.Submit(context.Background(), []byte("input"), false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(res) != "processed" {
-		t.Errorf("expected 'processed', got %s", string(res))
+	if len(results) != 1 || string(results[0].Data) != "processed" {
+		t.Errorf("expected 'processed', got %v", results)
 	}
 }
 
 func TestSubmit_Timeout(t *testing.T) {
 	p := NewWorkerPool(1)
-	p.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]byte, *processor.Metadata, error) {
+	p.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
 		time.Sleep(10 * time.Millisecond)
-		return []byte("processed"), nil, nil
+		return []processor.ProcessedResult{{Data: []byte("processed"), Metadata: nil}}, nil
 	})
 	defer p.Shutdown()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	_, _, err := p.Submit(ctx, []byte("some data"), false)
+	_, err := p.Submit(ctx, []byte("some data"), false)
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
 	}
@@ -57,7 +57,7 @@ func TestShutdown(t *testing.T) {
 	p := NewWorkerPool(2)
 	p.Shutdown()
 
-	_, _, err := p.Submit(context.Background(), []byte("data"), false)
+	_, err := p.Submit(context.Background(), []byte("data"), false)
 	if err == nil || err.Error() != "worker pool is closed" {
 		t.Errorf("expected 'worker pool is closed' error, got %v", err)
 	}
