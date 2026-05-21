@@ -75,16 +75,21 @@ func (a *S3Adapter) Download(ctx context.Context, bucket, key string) ([]byte, e
 	}
 	defer object.Close()
 
-	buf := bufferPool.Get().([]byte)
-	b := bytes.NewBuffer(buf[:0])
+	// Use a pooled buffer to read the raw stream, then copy the result into an
+	// independent allocation so the caller owns the returned slice and the pool
+	// buffer can be returned immediately without lifetime coupling.
+	poolBuf := bufferPool.Get().([]byte)
+	defer bufferPool.Put(poolBuf[:cap(poolBuf)])
 
-	_, err = io.Copy(b, object)
-	if err != nil {
-		bufferPool.Put(buf)
+	tmp := bytes.NewBuffer(poolBuf[:0])
+	if _, err = io.Copy(tmp, object); err != nil {
 		return nil, fmt.Errorf("failed to read object data: %w", err)
 	}
 
-	return b.Bytes(), nil
+	// Copy into a fresh allocation so we can safely return the poolBuf.
+	data := make([]byte, tmp.Len())
+	copy(data, tmp.Bytes())
+	return data, nil
 }
 
 func (a *S3Adapter) Upload(ctx context.Context, bucket, key string, data []byte, contentType string) error {
@@ -107,8 +112,6 @@ func (a *S3Adapter) Delete(ctx context.Context, bucket, key string) error {
 	return nil
 }
 
-func (a *S3Adapter) Release(data []byte) {
-	if cap(data) > 0 {
-		bufferPool.Put(data[:0])
-	}
-}
+// Release is a no-op kept for interface compatibility. Since Download now returns
+// an independently-owned slice, callers do not need to release it.
+func (a *S3Adapter) Release(_ []byte) {}

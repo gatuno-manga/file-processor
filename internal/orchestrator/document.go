@@ -32,29 +32,9 @@ func (o *DocumentOrchestrator) Run(ctx context.Context, consumer port.KafkaConsu
 func (o *DocumentOrchestrator) Handle(ctx context.Context, rawBucket, rawPath, targetBucket, targetPath, format string) error {
 	slog.Info("processing document", "rawBucket", rawBucket, "rawPath", rawPath, "targetBucket", targetBucket, "targetPath", targetPath, "format", format)
 
-	cleanPath := rawPath
-	if idx := strings.Index(cleanPath, "://"); idx != -1 {
-		cleanPath = cleanPath[idx+3:]
-	}
-	cleanPath = strings.TrimLeft(cleanPath, "/")
-
-	finalBucket := rawBucket
-	finalKey := cleanPath
-
-	// If bucket is explicitly provided, and the path starts with "bucket/", trim it
-	// to avoid redundant paths like bucket/bucket/key
-	if finalBucket != "" && strings.HasPrefix(finalKey, finalBucket+"/") {
-		finalKey = finalKey[len(finalBucket)+1:]
-	}
-
-	// Fallback for backward compatibility where rawPath might be "bucket/key"
-	if finalBucket == "" {
-		parts := strings.SplitN(cleanPath, "/", 2)
-		if len(parts) < 2 {
-			return fmt.Errorf("invalid rawPath format: %s", rawPath)
-		}
-		finalBucket = parts[0]
-		finalKey = parts[1]
+	finalBucket, finalKey, err := parseBucketAndKey(rawBucket, rawPath)
+	if err != nil {
+		return err
 	}
 
 	data, err := o.storage.Download(ctx, finalBucket, finalKey)

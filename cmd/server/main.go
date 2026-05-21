@@ -65,7 +65,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	kafkaAdapter := kafka.NewKafkaAdapter(cfg.KafkaBrokers, cfg.KafkaGroupID, cfg.KafkaInputTopic, cfg.KafkaOutputTopic, cfg.KafkaDocInput, cfg.KafkaDocOutput, cfg.MaxConcurrentTasks)
+	kafkaAdapter := kafka.NewKafkaAdapter(kafka.AdapterConfig{
+		Brokers:             cfg.KafkaBrokers,
+		GroupID:             cfg.KafkaGroupID,
+		InputTopic:          cfg.KafkaInputTopic,
+		OutputTopic:         cfg.KafkaOutputTopic,
+		DocInput:            cfg.KafkaDocInput,
+		DocOutput:           cfg.KafkaDocOutput,
+		MaxImageTasks:       cfg.MaxImageTasks,
+		MaxDocumentTasks:    cfg.MaxDocumentTasks,
+		StartFromBeginning:  cfg.KafkaStartFromBeginning,
+		NumPartitions:       cfg.KafkaNumPartitions,
+		ReplicationFactor:   cfg.KafkaReplicationFactor,
+	})
+	defer kafkaAdapter.Close()
 	if err := kafkaAdapter.Ping(ctx); err != nil {
 		slog.Error("failed to connect to Kafka", "brokers", cfg.KafkaBrokers, "error", err)
 		os.Exit(1)

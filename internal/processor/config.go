@@ -20,6 +20,13 @@ type Config struct {
 	KafkaOutputTopic string
 	KafkaDocInput    string
 	KafkaDocOutput   string
+	// KafkaStartFromBeginning sets StartOffset to FirstOffset when true.
+	// Should be false in production to avoid reprocessing on GroupID changes.
+	KafkaStartFromBeginning bool
+	// KafkaNumPartitions controls the number of partitions for auto-created topics (dev only).
+	KafkaNumPartitions    int
+	// KafkaReplicationFactor controls the replication factor for auto-created topics (dev only).
+	KafkaReplicationFactor int
 	StorageEndpoint  string
 	StorageAccessKey string
 	StorageSecretKey string
@@ -27,36 +34,54 @@ type Config struct {
 	VipsMaxCache     int
 	VipsMaxCacheMem  int
 	WebPQuality      int
-	MaxConcurrentTasks int
+	// MaxImageTasks limits concurrent image processing goroutines in the Kafka consumer.
+	MaxImageTasks int
+	// MaxDocumentTasks limits concurrent document processing goroutines in the Kafka consumer.
+	MaxDocumentTasks int
 }
 
 func LoadConfig() *Config {
 	poolSize := getEnvInt("WORKER_POOL_SIZE", 0)
-	maxConcurrentTasks := getEnvInt("MAX_CONCURRENT_TASKS", poolSize*2)
-	if maxConcurrentTasks <= 0 {
-		maxConcurrentTasks = 16
+
+	// Default image tasks: 2x pool size, fallback to 16 if pool size is 0.
+	maxImageTasks := getEnvInt("MAX_IMAGE_TASKS", 0)
+	if maxImageTasks <= 0 {
+		if poolSize > 0 {
+			maxImageTasks = poolSize * 2
+		} else {
+			maxImageTasks = 16
+		}
+	}
+
+	// Default document tasks: lighter workload, 4 concurrent by default.
+	maxDocumentTasks := getEnvInt("MAX_DOCUMENT_TASKS", 4)
+	if maxDocumentTasks <= 0 {
+		maxDocumentTasks = 4
 	}
 
 	return &Config{
-		AppEnv:           getEnv("APP_ENV", "development"),
-		Port:             getEnv("GRPC_PORT", "50051"),
-		HealthPort:       getEnv("HEALTH_PORT", "8081"),
-		PoolSize:         poolSize,
-		KafkaBrokers:     strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ","),
-		KafkaGroupID:     getEnv("KAFKA_GROUP_ID", "image-processor-go"),
-		KafkaInputTopic:  getEnv("KAFKA_TOPIC_INPUT", "image.processing.requested"),
-		KafkaOutputTopic: getEnv("KAFKA_TOPIC_OUTPUT", "image.processing.completed"),
-		KafkaDocInput:    getEnv("KAFKA_TOPIC_DOC_INPUT", "document.processing.requested"),
-		KafkaDocOutput:   getEnv("KAFKA_TOPIC_DOC_OUTPUT", "document.processing.completed"),
-		StorageEndpoint:  getEnv("STORAGE_ENDPOINT", "localhost:9000"),
-
-		StorageAccessKey: getEnv("STORAGE_ACCESS_KEY", ""),
-		StorageSecretKey: getEnv("STORAGE_SECRET_KEY", ""),
-		StorageSSL:       getEnvBool("STORAGE_SSL", false),
-		VipsMaxCache:     getEnvInt("VIPS_MAX_CACHE", 0),
-		VipsMaxCacheMem:  getEnvInt("VIPS_MAX_CACHE_MEM", 0),
-		WebPQuality:      getEnvInt("WEBP_QUALITY", 80),
-		MaxConcurrentTasks: maxConcurrentTasks,
+		AppEnv:                  getEnv("APP_ENV", "development"),
+		Port:                    getEnv("GRPC_PORT", "50051"),
+		HealthPort:              getEnv("HEALTH_PORT", "8081"),
+		PoolSize:                poolSize,
+		KafkaBrokers:            strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ","),
+		KafkaGroupID:            getEnv("KAFKA_GROUP_ID", "image-processor-go"),
+		KafkaInputTopic:         getEnv("KAFKA_TOPIC_INPUT", "image.processing.requested"),
+		KafkaOutputTopic:        getEnv("KAFKA_TOPIC_OUTPUT", "image.processing.completed"),
+		KafkaDocInput:           getEnv("KAFKA_TOPIC_DOC_INPUT", "document.processing.requested"),
+		KafkaDocOutput:          getEnv("KAFKA_TOPIC_DOC_OUTPUT", "document.processing.completed"),
+		KafkaStartFromBeginning: getEnvBool("KAFKA_START_FROM_BEGINNING", false),
+		KafkaNumPartitions:      getEnvInt("KAFKA_NUM_PARTITIONS", 1),
+		KafkaReplicationFactor:  getEnvInt("KAFKA_REPLICATION_FACTOR", 1),
+		StorageEndpoint:         getEnv("STORAGE_ENDPOINT", "localhost:9000"),
+		StorageAccessKey:        getEnv("STORAGE_ACCESS_KEY", ""),
+		StorageSecretKey:        getEnv("STORAGE_SECRET_KEY", ""),
+		StorageSSL:              getEnvBool("STORAGE_SSL", false),
+		VipsMaxCache:            getEnvInt("VIPS_MAX_CACHE", 0),
+		VipsMaxCacheMem:         getEnvInt("VIPS_MAX_CACHE_MEM", 0),
+		WebPQuality:             getEnvInt("WEBP_QUALITY", 80),
+		MaxImageTasks:           maxImageTasks,
+		MaxDocumentTasks:        maxDocumentTasks,
 	}
 }
 

@@ -25,32 +25,29 @@ var (
 		Buckets: prometheus.DefBuckets,
 	}, []string{"type"})
 
-	DefaultQuality = 80
-	MaxHeight      = 10000
-)
-
-type Metadata struct {
-	Width         int     `json:"width"`
-	Height        int     `json:"height"`
-	SizeBytes     int     `json:"sizeBytes"`
-	MimeType      string  `json:"mimeType"`
-	FormatOrigin  string  `json:"formatOrigin"`
-	BlurHash      string  `json:"blurHash"`
-	DominantColor string  `json:"dominantColor"`
-	PHash         string  `json:"pHash"`
-	Entropy       float64 `json:"entropy"`
+// ImageConfig holds the tunable parameters for image processing.
+type ImageConfig struct {
+	// Quality is the WebP lossy quality level (1–100). A zero or negative value
+	// triggers lossless encoding.
+	Quality int
+	// MaxHeight is the maximum height (in pixels) before an image is split into
+	// vertical slices for processing.
+	MaxHeight int
 }
 
-type ProcessedResult struct {
-	Data     []byte
-	Metadata *Metadata
+// DefaultConfig provides sensible defaults matching the previous global values.
+var DefaultConfig = ImageConfig{
+	Quality:   80,
+	MaxHeight: 10000,
 }
 
+// Process processes the input image with the default configuration.
 func Process(input []byte) ([]ProcessedResult, error) {
-	return ProcessLossy(input, DefaultQuality, false)
+	return ProcessLossy(input, DefaultConfig, false)
 }
 
-func ProcessLossy(input []byte, quality int, isBackfill bool) ([]ProcessedResult, error) {
+// ProcessLossy converts the input image to WebP using the provided config.
+func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedResult, error) {
 	start := time.Now()
 	defer func() {
 		processedTotal.WithLabelValues("image").Inc()
@@ -67,7 +64,7 @@ func ProcessLossy(input []byte, quality int, isBackfill bool) ([]ProcessedResult
 		return nil, err
 	}
 
-	if isBackfill && size.Height <= MaxHeight {
+	if isBackfill && size.Height <= cfg.MaxHeight {
 		_, format, err := image.DecodeConfig(bytes.NewReader(input))
 		if err == nil && format == "webp" {
 			metadata, err := extractMetadata(input)
@@ -85,14 +82,14 @@ func ProcessLossy(input []byte, quality int, isBackfill bool) ([]ProcessedResult
 		Speed:         1,
 	}
 
-	if quality > 0 {
-		options.Quality = quality
+	if cfg.Quality > 0 {
+		options.Quality = cfg.Quality
 		options.Lossless = false
 	} else {
 		options.Lossless = true
 	}
 
-	if size.Height <= MaxHeight {
+	if size.Height <= cfg.MaxHeight {
 		output, err := img.Process(options)
 		if err != nil {
 			return nil, err
@@ -108,13 +105,13 @@ func ProcessLossy(input []byte, quality int, isBackfill bool) ([]ProcessedResult
 		return []ProcessedResult{{Data: output, Metadata: metadata}}, nil
 	}
 
-	slog.Info("long image detected, splitting", "height", size.Height, "maxHeight", MaxHeight)
-	numParts := (size.Height + MaxHeight - 1) / MaxHeight
+	slog.Info("long image detected, splitting", "height", size.Height, "maxHeight", cfg.MaxHeight)
+	numParts := (size.Height + cfg.MaxHeight - 1) / cfg.MaxHeight
 	results := make([]ProcessedResult, 0, numParts)
 
 	for i := 0; i < numParts; i++ {
-		top := i * MaxHeight
-		height := MaxHeight
+		top := i * cfg.MaxHeight
+		height := cfg.MaxHeight
 		if top+height > size.Height {
 			height = size.Height - top
 		}
