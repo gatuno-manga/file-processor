@@ -24,7 +24,7 @@ var (
 	testPool   *pool.WorkerPool
 )
 
-func mockProcess(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
+func mockProcess(data []byte, cfg processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
 	time.Sleep(50 * time.Millisecond)
 	return []processor.ProcessedResult{
 		{
@@ -35,7 +35,7 @@ func mockProcess(data []byte, quality int, isBackfill bool) ([]processor.Process
 }
 
 func init() {
-	testPool = pool.NewWorkerPool(1)
+	testPool = pool.NewWorkerPool(1, processor.DefaultConfig)
 	testPool.SetProcessFunc(mockProcess)
 
 	lis = bufconn.Listen(bufSize)

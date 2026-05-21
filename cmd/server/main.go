@@ -37,10 +37,14 @@ func main() {
 	slog.Info("Gatuno File Processor starting...", "env", cfg.AppEnv)
 
 	processor.InitVips(cfg)
-	processor.DefaultQuality = cfg.WebPQuality
 	defer processor.ShutdownVips()
 
-	workerPool := pool.NewWorkerPool(cfg.PoolSize)
+	imageCfg := processor.ImageConfig{
+		Quality:   cfg.WebPQuality,
+		MaxHeight: processor.DefaultConfig.MaxHeight,
+	}
+
+	workerPool := pool.NewWorkerPool(cfg.PoolSize, imageCfg)
 	defer workerPool.Shutdown()
 
 	ctx, cancel := context.WithCancel(context.Background())

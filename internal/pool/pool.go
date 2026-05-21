@@ -25,22 +25,24 @@ type response struct {
 
 type WorkerPool struct {
 	jobChan     chan job
-	processFunc func([]byte, int, bool) ([]processor.ProcessedResult, error)
+	processFunc func([]byte, processor.ImageConfig, bool) ([]processor.ProcessedResult, error)
+	cfg         processor.ImageConfig
 	wg          sync.WaitGroup
 	chanPool    sync.Pool
 	mu          sync.Mutex
 	isClosed    bool
 }
 
-func NewWorkerPool(size int) *WorkerPool {
+func NewWorkerPool(size int, cfg processor.ImageConfig) *WorkerPool {
 	if size <= 0 {
 		size = runtime.GOMAXPROCS(0)
 	}
 
 	p := &WorkerPool{
 		jobChan: make(chan job, size),
-		processFunc: func(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
-			return processor.ProcessLossy(data, quality, isBackfill)
+		cfg:     cfg,
+		processFunc: func(data []byte, c processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
+			return processor.ProcessLossy(data, c, isBackfill)
 		},
 		chanPool: sync.Pool{
 			New: func() interface{} {
@@ -57,7 +59,7 @@ func NewWorkerPool(size int) *WorkerPool {
 	return p
 }
 
-func (p *WorkerPool) SetProcessFunc(f func([]byte, int, bool) ([]processor.ProcessedResult, error)) {
+func (p *WorkerPool) SetProcessFunc(f func([]byte, processor.ImageConfig, bool) ([]processor.ProcessedResult, error)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.processFunc = f
@@ -83,9 +85,10 @@ func (p *WorkerPool) worker() {
 
 			p.mu.Lock()
 			f := p.processFunc
+			cfg := p.cfg
 			p.mu.Unlock()
 
-			res, err := f(j.data, processor.DefaultQuality, j.isBackfill)
+			res, err := f(j.data, cfg, j.isBackfill)
 			j.result <- response{results: res, err: err}
 		}()
 	}

@@ -111,7 +111,7 @@ func TestStabilityBenchmark(t *testing.T) {
 	if pSize <= 0 {
 		pSize = runtime.GOMAXPROCS(0)
 	}
-	p := pool.NewWorkerPool(pSize)
+	p := pool.NewWorkerPool(pSize, processor.DefaultConfig)
 	defer p.Shutdown()
 
 	resolutions := []struct {

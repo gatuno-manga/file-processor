@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/luis/file-processor/internal/pool"
 	"github.com/luis/file-processor/internal/port"

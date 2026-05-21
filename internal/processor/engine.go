@@ -24,6 +24,26 @@ var (
 		Help:    "Duration of file processing",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"type"})
+)
+
+// Metadata holds the computed attributes of a processed image.
+type Metadata struct {
+	Width         int     `json:"width"`
+	Height        int     `json:"height"`
+	SizeBytes     int     `json:"sizeBytes"`
+	MimeType      string  `json:"mimeType"`
+	FormatOrigin  string  `json:"formatOrigin"`
+	BlurHash      string  `json:"blurHash"`
+	DominantColor string  `json:"dominantColor"`
+	PHash         string  `json:"pHash"`
+	Entropy       float64 `json:"entropy"`
+}
+
+// ProcessedResult wraps the output bytes and metadata of a single processed image.
+type ProcessedResult struct {
+	Data     []byte
+	Metadata *Metadata
+}
 
 // ImageConfig holds the tunable parameters for image processing.
 type ImageConfig struct {
@@ -35,7 +55,7 @@ type ImageConfig struct {
 	MaxHeight int
 }
 
-// DefaultConfig provides sensible defaults matching the previous global values.
+// DefaultConfig provides sensible defaults matching the previous behaviour.
 var DefaultConfig = ImageConfig{
 	Quality:   80,
 	MaxHeight: 10000,
@@ -45,6 +65,7 @@ var DefaultConfig = ImageConfig{
 func Process(input []byte) ([]ProcessedResult, error) {
 	return ProcessLossy(input, DefaultConfig, false)
 }
+
 
 // ProcessLossy converts the input image to WebP using the provided config.
 func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedResult, error) {

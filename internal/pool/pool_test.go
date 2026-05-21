@@ -10,19 +10,19 @@ import (
 )
 
 func TestNewWorkerPool(t *testing.T) {
-	p := NewWorkerPool(0)
+	p := NewWorkerPool(0, processor.DefaultConfig)
 	if len(p.jobChan) != runtime.GOMAXPROCS(0) {
 		// Note: jobChan capacity is the size
 	}
 	p.Shutdown()
 
-	p2 := NewWorkerPool(2)
+	p2 := NewWorkerPool(2, processor.DefaultConfig)
 	p2.Shutdown()
 }
 
 func TestSubmit_Success(t *testing.T) {
-	p := NewWorkerPool(1)
-	p.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
+	p := NewWorkerPool(1, processor.DefaultConfig)
+	p.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
 		return []processor.ProcessedResult{{Data: []byte("processed"), Metadata: &processor.Metadata{}}}, nil
 	})
 	defer p.Shutdown()
@@ -37,8 +37,8 @@ func TestSubmit_Success(t *testing.T) {
 }
 
 func TestSubmit_Timeout(t *testing.T) {
-	p := NewWorkerPool(1)
-	p.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
+	p := NewWorkerPool(1, processor.DefaultConfig)
+	p.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
 		time.Sleep(10 * time.Millisecond)
 		return []processor.ProcessedResult{{Data: []byte("processed"), Metadata: nil}}, nil
 	})
@@ -54,7 +54,7 @@ func TestSubmit_Timeout(t *testing.T) {
 }
 
 func TestShutdown(t *testing.T) {
-	p := NewWorkerPool(2)
+	p := NewWorkerPool(2, processor.DefaultConfig)
 	p.Shutdown()
 
 	_, err := p.Submit(context.Background(), []byte("data"), false)
