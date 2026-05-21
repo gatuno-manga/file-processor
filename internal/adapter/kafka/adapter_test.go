@@ -137,7 +137,7 @@ func TestKafkaAdapter_Consume(t *testing.T) {
 		},
 	}
 
-	adapter := &KafkaAdapter{reader: mr, writer: mw, semaphore: make(chan struct{}, 1)}
+	adapter := &KafkaAdapter{reader: mr, writer: mw, imageSemaphore: make(chan struct{}, 1), documentSemaphore: make(chan struct{}, 1)}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var handled bool

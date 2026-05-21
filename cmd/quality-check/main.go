@@ -92,7 +92,8 @@ func main() {
 		}
 
 		start := time.Now()
-		results, err := processor.ProcessLossy(data, quality, false)
+		cfg := processor.ImageConfig{Quality: quality, MaxHeight: processor.DefaultConfig.MaxHeight}
+		results, err := processor.ProcessLossy(data, cfg, false)
 		duration := time.Since(start).Round(time.Millisecond)
 
 		if err != nil {

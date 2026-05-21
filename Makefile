@@ -22,7 +22,7 @@ logs:
 
 test:
 	@echo "Running tests inside dev container..."
-	$(COMPOSE_DEV) run --rm gatuno-processor-dev go test -v ./...
+	$(COMPOSE_DEV) run --rm file-processor go test -v ./...
 
 clean:
 	@echo "Cleaning up..."

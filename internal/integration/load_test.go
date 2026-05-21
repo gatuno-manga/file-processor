@@ -42,7 +42,7 @@ func generateTestImage(width, height int) ([]byte, error) {
 
 func TestLoadConcurrency(t *testing.T) {
 	cfg := processor.LoadConfig()
-	p := pool.NewWorkerPool(cfg.PoolSize)
+	p := pool.NewWorkerPool(cfg.PoolSize, processor.DefaultConfig)
 	defer p.Shutdown()
 
 	resolutions := []struct {

@@ -41,7 +41,7 @@ func main() {
 	processor.InitVips(cfg)
 	defer processor.ShutdownVips()
 
-	p := pool.NewWorkerPool(cfg.PoolSize)
+	p := pool.NewWorkerPool(cfg.PoolSize, processor.DefaultConfig)
 	defer p.Shutdown()
 
 	const count = 100

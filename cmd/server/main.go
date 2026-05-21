@@ -37,10 +37,14 @@ func main() {
 	slog.Info("Gatuno File Processor starting...", "env", cfg.AppEnv)
 
 	processor.InitVips(cfg)
-	processor.DefaultQuality = cfg.WebPQuality
 	defer processor.ShutdownVips()
 
-	workerPool := pool.NewWorkerPool(cfg.PoolSize)
+	imageCfg := processor.ImageConfig{
+		Quality:   cfg.WebPQuality,
+		MaxHeight: processor.DefaultConfig.MaxHeight,
+	}
+
+	workerPool := pool.NewWorkerPool(cfg.PoolSize, imageCfg)
 	defer workerPool.Shutdown()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -65,7 +69,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	kafkaAdapter := kafka.NewKafkaAdapter(cfg.KafkaBrokers, cfg.KafkaGroupID, cfg.KafkaInputTopic, cfg.KafkaOutputTopic, cfg.KafkaDocInput, cfg.KafkaDocOutput, cfg.MaxConcurrentTasks)
+	kafkaAdapter := kafka.NewKafkaAdapter(kafka.AdapterConfig{
+		Brokers:             cfg.KafkaBrokers,
+		GroupID:             cfg.KafkaGroupID,
+		InputTopic:          cfg.KafkaInputTopic,
+		OutputTopic:         cfg.KafkaOutputTopic,
+		DocInput:            cfg.KafkaDocInput,
+		DocOutput:           cfg.KafkaDocOutput,
+		MaxImageTasks:       cfg.MaxImageTasks,
+		MaxDocumentTasks:    cfg.MaxDocumentTasks,
+		StartFromBeginning:  cfg.KafkaStartFromBeginning,
+		NumPartitions:       cfg.KafkaNumPartitions,
+		ReplicationFactor:   cfg.KafkaReplicationFactor,
+	})
+	defer kafkaAdapter.Close()
 	if err := kafkaAdapter.Ping(ctx); err != nil {
 		slog.Error("failed to connect to Kafka", "brokers", cfg.KafkaBrokers, "error", err)
 		os.Exit(1)

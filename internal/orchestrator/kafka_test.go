@@ -55,8 +55,8 @@ func (m *mockProducer) EmitDocumentProcessingCompletedEvent(ctx context.Context,
 }
 
 func TestKafkaOrchestrator_Handle(t *testing.T) {
-	testPool := pool.NewWorkerPool(1)
-	testPool.SetProcessFunc(func(data []byte, quality int, isBackfill bool) ([]processor.ProcessedResult, error) {
+	testPool := pool.NewWorkerPool(1, processor.DefaultConfig)
+	testPool.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
 		return []processor.ProcessedResult{{Data: []byte("sanitized"), Metadata: &processor.Metadata{}}}, nil
 	})
 

@@ -35,33 +35,9 @@ func (o *KafkaOrchestrator) Run(ctx context.Context, consumer port.KafkaConsumer
 func (o *KafkaOrchestrator) Handle(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
 	slog.Info("processing image", "rawBucket", rawBucket, "rawPath", rawPath, "originalUrl", originalUrl, "targetBucket", targetBucket, "targetPath", targetPath, "isBackfill", isBackfill)
 
-	cleanPath := rawPath
-	if idx := strings.Index(cleanPath, "://"); idx != -1 {
-		cleanPath = cleanPath[idx+3:]
-	}
-	cleanPath = strings.TrimLeft(cleanPath, "/")
-
-	finalBucket := rawBucket
-	finalKey := cleanPath
-
-	// If bucket is explicitly provided, and the path starts with "bucket/", trim it
-	// to avoid redundant paths like bucket/bucket/key
-	if finalBucket != "" && strings.HasPrefix(finalKey, finalBucket+"/") {
-		finalKey = finalKey[len(finalBucket)+1:]
-	}
-
-	// Fallback for backward compatibility where rawPath might be "bucket/key"
-	if finalBucket == "" {
-		parts := strings.SplitN(cleanPath, "/", 2)
-		if len(parts) < 2 {
-			return fmt.Errorf("invalid rawPath format (expected bucket/key): %s", rawPath)
-		}
-		finalBucket = parts[0]
-		finalKey = parts[1]
-	}
-
-	if strings.Contains(finalBucket, ":") || finalBucket == "" {
-		return fmt.Errorf("invalid bucket name: %s", finalBucket)
+	finalBucket, finalKey, err := parseBucketAndKey(rawBucket, rawPath)
+	if err != nil {
+		return err
 	}
 
 	data, err := o.storage.Download(ctx, finalBucket, finalKey)
