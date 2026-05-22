@@ -118,6 +118,7 @@ func NewKafkaAdapter(cfg AdapterConfig) *KafkaAdapter {
 		docInput:          cfg.DocInput,
 		docOutput:         cfg.DocOutput,
 	}
+	a.healthy.Store(true)
 	return a
 }
 
@@ -283,6 +284,7 @@ func (a *KafkaAdapter) ConsumeDocumentRequests(ctx context.Context, handler func
 				return nil
 			}
 			slog.Error("failed to fetch document message from kafka", "error", err, "retryIn", backoff)
+			a.healthy.Store(false)
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
@@ -293,6 +295,7 @@ func (a *KafkaAdapter) ConsumeDocumentRequests(ctx context.Context, handler func
 		}
 
 		backoff = initialBackoff
+		a.healthy.Store(true)
 
 		var event DocumentProcessingRequestedEvent
 		if err := json.Unmarshal(msg.Value, &event); err != nil {
@@ -330,8 +333,7 @@ func (a *KafkaAdapter) ConsumeDocumentRequests(ctx context.Context, handler func
 	}
 }
 
-// IsReady returns true if the adapter has successfully fetched at least one message
-// since startup and is not in an error backoff state.
+// IsReady returns true if the adapter is initialized and not in an error backoff state.
 func (a *KafkaAdapter) IsReady() bool {
 	return a.writer != nil && a.reader != nil && a.docWriter != nil && a.docReader != nil && a.healthy.Load()
 }
