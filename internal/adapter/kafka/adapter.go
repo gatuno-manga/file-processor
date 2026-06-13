@@ -65,10 +65,9 @@ type KafkaAdapter struct {
 }
 
 func NewKafkaAdapter(cfg AdapterConfig) *KafkaAdapter {
-	startOffset := kafka.LastOffset
-	if cfg.StartFromBeginning {
-		startOffset = kafka.FirstOffset
-	}
+	// 2. Fallback resiliente: Sempre usar FirstOffset para garantir processamento de backlog.
+	// Em serviços orientados a eventos, queremos processar mensagens acumuladas em caso de queda.
+	startOffset := kafka.FirstOffset
 
 	writer := &kafka.Writer{
 		Addr:     kafka.TCP(cfg.Brokers...),
@@ -76,6 +75,8 @@ func NewKafkaAdapter(cfg AdapterConfig) *KafkaAdapter {
 		Balancer: &kafka.LeastBytes{},
 	}
 
+	// 3. GroupID Isolado: Mantemos o ID original para imagens para preservar o offset/histórico
+	// e criamos um novo (-docs) para isolar os documentos.
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:     cfg.Brokers,
 		Topic:       cfg.InputTopic,
@@ -89,10 +90,11 @@ func NewKafkaAdapter(cfg AdapterConfig) *KafkaAdapter {
 		Balancer: &kafka.LeastBytes{},
 	}
 
+	// 3. GroupID Isolado: Adicionado sufixo para documentos
 	docReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:     cfg.Brokers,
 		Topic:       cfg.DocInput,
-		GroupID:     cfg.GroupID,
+		GroupID:     cfg.GroupID + "-docs",
 		StartOffset: startOffset,
 	})
 
@@ -249,7 +251,9 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 			return nil
 		}
 
-		go func(m kafka.Message, e ImageProcessingRequestedEvent) {
+		// 1. Processamento Síncrono: A remoção da goroutine garante que os commits de Kafka
+		// não ocorram fora de ordem por diferenças no tempo de processamento.
+		func(m kafka.Message, e ImageProcessingRequestedEvent) {
 			defer func() { <-a.imageSemaphore }()
 
 			if err := handler(ctx, e.RawBucket, e.RawPath, e.OriginalUrl, e.TargetBucket, e.TargetPath, e.IsBackfill); err != nil {
@@ -313,7 +317,9 @@ func (a *KafkaAdapter) ConsumeDocumentRequests(ctx context.Context, handler func
 			return nil
 		}
 
-		go func(m kafka.Message, e DocumentProcessingRequestedEvent) {
+		// 1. Processamento Síncrono: A remoção da goroutine garante que os commits de Kafka
+		// não ocorram fora de ordem por diferenças no tempo de processamento.
+		func(m kafka.Message, e DocumentProcessingRequestedEvent) {
 			defer func() { <-a.documentSemaphore }()
 
 			if err := handler(ctx, e.RawBucket, e.RawPath, e.TargetBucket, e.TargetPath, e.Format); err != nil {
