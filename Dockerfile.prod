@@ -12,14 +12,18 @@ WORKDIR /app
 
 # Copy dependency files and download
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy the source code
 COPY . .
 
 # Build the application
 # We use CGO_ENABLED=1 because bimg is a CGO wrapper around libvips
-RUN CGO_ENABLED=1 GOOS=linux go build -v -o server ./cmd/server/main.go
+# We use BuildKit cache mounts to prevent the massive CGO build cache from blowing up the container disk limit
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=1 GOOS=linux go build -v -o server ./cmd/server/main.go
 
 # Stage 2: Final minimal image
 FROM alpine:3.20
