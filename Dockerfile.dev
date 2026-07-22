@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM golang:1.23-alpine3.20
 
 # Install build dependencies for bimg/libvips
@@ -13,7 +14,8 @@ RUN go install github.com/air-verse/air@v1.52.3
 
 # Copy go.mod and go.sum first for better caching
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Note: We don't COPY . here in the Dockerfile because we will mount the source 
 # code as a volume in docker-compose.dev.yml for live reloading.

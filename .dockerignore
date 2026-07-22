@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+tmp
+bin
+test-results
+test-images
+*.out
+*.log
+.env
+.air.toml
+.planning

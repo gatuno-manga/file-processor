@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # Stage 1: Build the Go application
 FROM golang:1.23-alpine3.20 AS builder
 
@@ -21,28 +22,27 @@ COPY . .
 # Build the application
 # We use CGO_ENABLED=1 because bimg is a CGO wrapper around libvips
 # We use BuildKit cache mounts to prevent the massive CGO build cache from blowing up the container disk limit
+# Using -ldflags="-s -w" to strip debug information and reduce binary size
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=1 GOOS=linux go build -v -o server ./cmd/server/main.go
+    CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -v -o server ./cmd/server/main.go
 
 # Stage 2: Final minimal image
 FROM alpine:3.20
 
-# Install runtime dependencies for libvips and CA certificates for S3
+# Install runtime dependencies for libvips, CA certificates for S3, and tzdata
 RUN apk add --no-cache \
     vips \
-    ca-certificates
+    ca-certificates \
+    tzdata
 
 # Create a non-root user for security
-RUN adduser -D -u 10001 appuser
+RUN adduser -D -g '' -h /app -u 10001 appuser
 
 WORKDIR /app
 
-# Copy the binary from the builder stage
-COPY --from=builder /app/server .
-
-# Ensure the appuser can execute the binary
-RUN chown appuser:appuser /app/server
+# Copy the binary from the builder stage and change ownership
+COPY --from=builder --chown=appuser:appuser /app/server .
 
 # Switch to non-root user
 USER appuser
