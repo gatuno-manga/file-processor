@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/luis/file-processor/internal/adapter/kafka"
 	"github.com/luis/file-processor/internal/adapter/storage"
@@ -70,17 +71,21 @@ func main() {
 	}
 
 	kafkaAdapter := kafka.NewKafkaAdapter(kafka.AdapterConfig{
-		Brokers:             cfg.KafkaBrokers,
-		GroupID:             cfg.KafkaGroupID,
-		InputTopic:          cfg.KafkaInputTopic,
-		OutputTopic:         cfg.KafkaOutputTopic,
-		DocInput:            cfg.KafkaDocInput,
-		DocOutput:           cfg.KafkaDocOutput,
-		MaxImageTasks:       cfg.MaxImageTasks,
-		MaxDocumentTasks:    cfg.MaxDocumentTasks,
-		StartFromBeginning:  cfg.KafkaStartFromBeginning,
-		NumPartitions:       cfg.KafkaNumPartitions,
-		ReplicationFactor:   cfg.KafkaReplicationFactor,
+		Brokers:            cfg.KafkaBrokers,
+		GroupID:            cfg.KafkaGroupID,
+		InputTopic:         cfg.KafkaInputTopic,
+		OutputTopic:        cfg.KafkaOutputTopic,
+		DocInput:           cfg.KafkaDocInput,
+		DocOutput:          cfg.KafkaDocOutput,
+		MaxImageTasks:      cfg.MaxImageTasks,
+		MaxDocumentTasks:   cfg.MaxDocumentTasks,
+		StartFromBeginning: cfg.KafkaStartFromBeginning,
+		NumPartitions:      cfg.KafkaNumPartitions,
+		ReplicationFactor:  cfg.KafkaReplicationFactor,
+		DLQSuffix:          cfg.KafkaDLQSuffix,
+		MaxDeliveryTries:   cfg.MaxDeliveryTries,
+		RetryBackoff:       cfg.RetryBackoff,
+		ProcessTimeout:     cfg.ProcessTimeout,
 	})
 	defer kafkaAdapter.Close()
 	if err := kafkaAdapter.Ping(ctx); err != nil {
@@ -129,7 +134,9 @@ func main() {
 	gGroup.Go(func() error {
 		go func() {
 			<-ctx.Done()
-			healthServer.Shutdown(context.Background())
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			healthServer.Shutdown(shutdownCtx)
 		}()
 		if err := healthServer.ListenAndServe(); err != http.ErrServerClosed {
 			return fmt.Errorf("health server error: %w", err)
@@ -139,6 +146,7 @@ func main() {
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", cfg.Port))
 	if err != nil {
+		slog.Error("failed to listen on gRPC port", "port", cfg.Port, "error", err)
 		os.Exit(1)
 	}
 
@@ -158,6 +166,8 @@ func main() {
 
 	if err := gGroup.Wait(); err != nil {
 		slog.Error("Gatuno execution error", "error", err)
+		slog.Info("Gatuno stopped")
+		os.Exit(1)
 	}
 
 	slog.Info("Gatuno stopped")
