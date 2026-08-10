@@ -66,7 +66,6 @@ func Process(input []byte) ([]ProcessedResult, error) {
 	return ProcessLossy(input, DefaultConfig, false)
 }
 
-
 // ProcessLossy converts the input image to WebP using the provided config.
 func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedResult, error) {
 	start := time.Now()
@@ -117,12 +116,11 @@ func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedRe
 		}
 		metadata, err := extractMetadata(input)
 		if err != nil {
-			slog.Warn("failed to extract metadata", "error", err)
+			slog.Warn("metadata extraction failed, emitting partial metadata", "error", err)
+			metadata = &Metadata{}
 		}
-		if metadata != nil {
-			metadata.SizeBytes = len(output)
-			metadata.MimeType = "image/webp"
-		}
+		metadata.SizeBytes = len(output)
+		metadata.MimeType = "image/webp"
 		return []ProcessedResult{{Data: output, Metadata: metadata}}, nil
 	}
 
@@ -138,10 +136,10 @@ func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedRe
 		}
 
 		extractOpts := bimg.Options{
-			Top:    top,
-			Left:   0,
-			Width:  size.Width,
-			Height: height,
+			Top:        top,
+			Left:       0,
+			AreaWidth:  size.Width,
+			AreaHeight: height,
 		}
 		slice, err := bimg.NewImage(input).Process(extractOpts)
 		if err != nil {
@@ -155,12 +153,11 @@ func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedRe
 
 		metadata, err := extractMetadata(slice)
 		if err != nil {
-			slog.Warn("failed to extract metadata for slice", "index", i, "error", err)
+			slog.Warn("metadata extraction failed for slice, emitting partial metadata", "index", i, "error", err)
+			metadata = &Metadata{}
 		}
-		if metadata != nil {
-			metadata.SizeBytes = len(output)
-			metadata.MimeType = "image/webp"
-		}
+		metadata.SizeBytes = len(output)
+		metadata.MimeType = "image/webp"
 		results = append(results, ProcessedResult{Data: output, Metadata: metadata})
 	}
 
