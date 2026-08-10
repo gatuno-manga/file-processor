@@ -116,7 +116,10 @@ func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool) (
 	p.mu.Unlock()
 
 	resChan := p.chanPool.Get().(chan response)
-	defer p.chanPool.Put(resChan)
+	// NOTE: resChan is deliberately NOT recycled on the cancellation paths below.
+	// A worker holding this job may still send into it after we return; recycling
+	// would hand a stale response to the next caller. Dropping it is cheap — the
+	// pool simply allocates a new one.
 
 	j := job{
 		ctx:        ctx,
@@ -133,6 +136,7 @@ func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool) (
 
 	select {
 	case res := <-resChan:
+		p.chanPool.Put(resChan) // safe: buffer is empty and the worker is done
 		return res.results, res.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
