@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/h2non/bimg"
 )
@@ -24,20 +25,29 @@ type Config struct {
 	// Should be false in production to avoid reprocessing on GroupID changes.
 	KafkaStartFromBeginning bool
 	// KafkaNumPartitions controls the number of partitions for auto-created topics (dev only).
-	KafkaNumPartitions    int
+	KafkaNumPartitions int
 	// KafkaReplicationFactor controls the replication factor for auto-created topics (dev only).
 	KafkaReplicationFactor int
-	StorageEndpoint  string
-	StorageAccessKey string
-	StorageSecretKey string
-	StorageSSL       bool
-	VipsMaxCache     int
-	VipsMaxCacheMem  int
-	WebPQuality      int
+	StorageEndpoint        string
+	StorageAccessKey       string
+	StorageSecretKey       string
+	StorageSSL             bool
+	VipsMaxCache           int
+	VipsMaxCacheMem        int
+	WebPQuality            int
 	// MaxImageTasks limits concurrent image processing goroutines in the Kafka consumer.
 	MaxImageTasks int
 	// MaxDocumentTasks limits concurrent document processing goroutines in the Kafka consumer.
 	MaxDocumentTasks int
+	// ProcessTimeout bounds how long a single Kafka message handler may run.
+	// Must exceed the p99.9 of file_processor_duration_seconds plus S3 round-trips.
+	ProcessTimeout time.Duration
+	// KafkaDLQSuffix is appended to the input topic name to derive the dead-letter topic.
+	KafkaDLQSuffix string
+	// MaxDeliveryTries caps in-message retries before a message is routed to the DLQ.
+	MaxDeliveryTries int
+	// RetryBackoff is the initial delay between retries; it doubles after each attempt.
+	RetryBackoff time.Duration
 }
 
 func LoadConfig() *Config {
@@ -82,6 +92,10 @@ func LoadConfig() *Config {
 		WebPQuality:             getEnvInt("WEBP_QUALITY", 80),
 		MaxImageTasks:           maxImageTasks,
 		MaxDocumentTasks:        maxDocumentTasks,
+		ProcessTimeout:          getEnvDuration("PROCESS_TIMEOUT", 120*time.Second),
+		KafkaDLQSuffix:          getEnv("KAFKA_DLQ_SUFFIX", ".dlq"),
+		MaxDeliveryTries:        getEnvInt("KAFKA_MAX_DELIVERY_TRIES", 3),
+		RetryBackoff:            getEnvDuration("KAFKA_RETRY_BACKOFF", 500*time.Millisecond),
 	}
 }
 
@@ -105,6 +119,15 @@ func getEnvBool(key string, fallback bool) bool {
 	if value, ok := os.LookupEnv(key); ok {
 		if b, err := strconv.ParseBool(value); err == nil {
 			return b
+		}
+	}
+	return fallback
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if value, ok := os.LookupEnv(key); ok {
+		if d, err := time.ParseDuration(value); err == nil {
+			return d
 		}
 	}
 	return fallback

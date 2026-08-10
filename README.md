@@ -22,6 +22,11 @@ O serviço é configurado via variáveis de ambiente. Você pode encontrar um ex
 | `WEBP_QUALITY` | Qualidade da conversão para WebP (1-100). | `80` |
 | `VIPS_MAX_CACHE` | Limite máximo de operações no cache do libvips. | `0` |
 | `VIPS_MAX_CACHE_MEM` | Limite máximo de memória (em bytes) para o cache do libvips. | `0` |
+| `PROCESS_TIMEOUT` | Timeout por mensagem no consumidor Kafka. Deve exceder o p99.9 de `file_processor_duration_seconds` somado aos round-trips de S3. | `120s` |
+| `KAFKA_DLQ_SUFFIX` | Sufixo do tópico de dead-letter, montado como `<tópico-de-entrada><sufixo>`. | `.dlq` |
+| `KAFKA_MAX_DELIVERY_TRIES` | Tentativas de entrega antes de enviar a mensagem para a DLQ. | `3` |
+| `KAFKA_RETRY_BACKOFF` | Atraso inicial entre tentativas (dobra a cada falha). | `500ms` |
+| `KAFKA_START_FROM_BEGINNING` | Se `true`, usa `FirstOffset` — mas isso só tem efeito quando o consumer group ainda não possui offsets commitados; um group já existente sempre retoma do último commit. Use `false` em produção. | `false` |
 
 ## Como rodar
 
