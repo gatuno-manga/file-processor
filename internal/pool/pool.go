@@ -15,6 +15,7 @@ type job struct {
 	ctx        context.Context
 	data       []byte
 	isBackfill bool
+	widths     []int
 	result     chan response
 }
 
@@ -25,7 +26,7 @@ type response struct {
 
 type WorkerPool struct {
 	jobChan     chan job
-	processFunc func([]byte, processor.ImageConfig, bool) ([]processor.ProcessedResult, error)
+	processFunc func([]byte, processor.ImageConfig, bool, []int) ([]processor.ProcessedResult, error)
 	cfg         processor.ImageConfig
 	wg          sync.WaitGroup
 	chanPool    sync.Pool
@@ -41,8 +42,8 @@ func NewWorkerPool(size int, cfg processor.ImageConfig) *WorkerPool {
 	p := &WorkerPool{
 		jobChan: make(chan job, size),
 		cfg:     cfg,
-		processFunc: func(data []byte, c processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
-			return processor.ProcessLossy(data, c, isBackfill)
+		processFunc: func(data []byte, c processor.ImageConfig, isBackfill bool, widths []int) ([]processor.ProcessedResult, error) {
+			return processor.ProcessLossy(data, c, isBackfill, widths)
 		},
 		chanPool: sync.Pool{
 			New: func() interface{} {
@@ -59,7 +60,7 @@ func NewWorkerPool(size int, cfg processor.ImageConfig) *WorkerPool {
 	return p
 }
 
-func (p *WorkerPool) SetProcessFunc(f func([]byte, processor.ImageConfig, bool) ([]processor.ProcessedResult, error)) {
+func (p *WorkerPool) SetProcessFunc(f func([]byte, processor.ImageConfig, bool, []int) ([]processor.ProcessedResult, error)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.processFunc = f
@@ -88,7 +89,7 @@ func (p *WorkerPool) worker() {
 			cfg := p.cfg
 			p.mu.Unlock()
 
-			res, err := f(j.data, cfg, j.isBackfill)
+			res, err := f(j.data, cfg, j.isBackfill, j.widths)
 			j.result <- response{results: res, err: err}
 		}()
 	}
@@ -107,7 +108,7 @@ func (p *WorkerPool) Shutdown() {
 	p.wg.Wait()
 }
 
-func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool) ([]processor.ProcessedResult, error) {
+func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool, widths []int) ([]processor.ProcessedResult, error) {
 	p.mu.Lock()
 	if p.isClosed {
 		p.mu.Unlock()
@@ -125,6 +126,7 @@ func (p *WorkerPool) Submit(ctx context.Context, data []byte, isBackfill bool) (
 		ctx:        ctx,
 		data:       data,
 		isBackfill: isBackfill,
+		widths:     widths,
 		result:     resChan,
 	}
 

@@ -114,6 +114,7 @@ func TestKafkaAdapter_Consume(t *testing.T) {
 		TargetBucket: "books",
 		TargetPath:   "test.webp",
 		IsBackfill:   true,
+		Widths:       []int{600, 300},
 	}
 	payload, _ := json.Marshal(event)
 
@@ -152,9 +153,11 @@ func TestKafkaAdapter_Consume(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var handled bool
-	handler := func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
-		if rawBucket == "processing" && rawPath == "test.jpg" && originalUrl == "https://example.com/test.jpg" && targetBucket == "books" && targetPath == "test.webp" && isBackfill {
-			handled = true
+	handler := func(ctx context.Context, req port.ImageProcessingRequest) error {
+		if req.RawBucket == "processing" && req.RawPath == "test.jpg" && req.OriginalUrl == "https://example.com/test.jpg" && req.TargetBucket == "books" && req.TargetPath == "test.webp" && req.IsBackfill {
+			if len(req.Widths) == 2 && req.Widths[0] == 600 && req.Widths[1] == 300 {
+				handled = true
+			}
 		}
 		cancel()
 		return nil
@@ -163,7 +166,79 @@ func TestKafkaAdapter_Consume(t *testing.T) {
 	adapter.Consume(ctx, handler)
 
 	if !handled {
-		t.Error("expected handler to be called")
+		t.Error("expected handler to be called with the requested widths threaded through")
+	}
+}
+
+// TestConsume_TooManyWidthsGoesToDLQ covers the server-side safety cap: widths
+// are caller-supplied input from the Kafka event, so a message asking for more
+// than processor.MaxVariantWidths must be rejected before the handler (and the
+// S3 download/decode it triggers) ever runs.
+func TestConsume_TooManyWidthsGoesToDLQ(t *testing.T) {
+	widths := make([]int, processor.MaxVariantWidths+1)
+	for i := range widths {
+		widths[i] = 100 * (i + 1)
+	}
+	event := ImageProcessingRequestedEvent{
+		RawBucket:    "processing",
+		RawPath:      "test.jpg",
+		TargetBucket: "books",
+		TargetPath:   "test.webp",
+		Widths:       widths,
+	}
+	payload, _ := json.Marshal(event)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	fetchCount := 0
+	var dlqMsgs []kafka.Message
+	var commitCount int
+
+	mr := &mockKafkaReader{
+		fetchFunc: func(ctx context.Context) (kafka.Message, error) {
+			fetchCount++
+			if fetchCount == 1 {
+				return kafka.Message{Value: payload, Offset: 3}, nil
+			}
+			cancel()
+			return kafka.Message{}, ctx.Err()
+		},
+		commitFunc: func(ctx context.Context, msgs ...kafka.Message) error {
+			commitCount++
+			return nil
+		},
+	}
+	mdlq := &mockKafkaWriter{
+		writeFunc: func(ctx context.Context, msgs ...kafka.Message) error {
+			dlqMsgs = append(dlqMsgs, msgs...)
+			return nil
+		},
+	}
+
+	adapter := &KafkaAdapter{
+		reader:            mr,
+		dlqWriter:         mdlq,
+		imageSemaphore:    make(chan struct{}, 1),
+		documentSemaphore: make(chan struct{}, 1),
+		maxTries:          1,
+		retryBackoff:      time.Millisecond,
+		processTimeout:    time.Second,
+	}
+
+	handler := func(ctx context.Context, req port.ImageProcessingRequest) error {
+		t.Fatal("handler should never be invoked when the widths cap is exceeded")
+		return nil
+	}
+
+	adapter.Consume(ctx, handler)
+
+	if len(dlqMsgs) != 1 {
+		t.Fatalf("expected the oversized-widths message to be routed to the DLQ exactly once, got %d", len(dlqMsgs))
+	}
+	if headerValue(dlqMsgs[0].Headers, "x-error-stage") != "validate" {
+		t.Errorf("expected x-error-stage=validate, got %q", headerValue(dlqMsgs[0].Headers, "x-error-stage"))
+	}
+	if commitCount != 1 {
+		t.Errorf("expected the oversized-widths message to be committed so the partition doesn't stall, got %d commits", commitCount)
 	}
 }
 
@@ -478,7 +553,7 @@ func TestConsume_MalformedMessageGoesToDLQ(t *testing.T) {
 		processTimeout:    time.Second,
 	}
 
-	handler := func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
+	handler := func(ctx context.Context, req port.ImageProcessingRequest) error {
 		t.Fatal("handler should never be invoked for a malformed message")
 		return nil
 	}
@@ -545,11 +620,11 @@ func TestConsume_PanicRecoversAndProcessesNextMessage(t *testing.T) {
 	}
 
 	var secondHandled bool
-	handler := func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
-		if rawPath == "1.jpg" {
+	handler := func(ctx context.Context, req port.ImageProcessingRequest) error {
+		if req.RawPath == "1.jpg" {
 			panic("boom")
 		}
-		if rawPath == "2.jpg" {
+		if req.RawPath == "2.jpg" {
 			secondHandled = true
 		}
 		return nil

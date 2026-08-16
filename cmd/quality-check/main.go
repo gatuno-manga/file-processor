@@ -12,6 +12,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/luis/file-processor/internal/processor"
@@ -37,6 +39,8 @@ func main() {
 		fmt.Sscanf(qualityStr, "%d", &quality)
 	}
 
+	widths := parseVariantWidths(os.Getenv("VARIANT_WIDTHS"))
+
 	processor.InitVips(processor.LoadConfig())
 	defer processor.ShutdownVips()
 
@@ -45,6 +49,9 @@ func main() {
 		fmt.Printf("Mode: Lossy (Quality: %d)\n", quality)
 	} else {
 		fmt.Printf("Mode: Lossless\n")
+	}
+	if len(widths) > 0 {
+		fmt.Printf("Variants: %v (written alongside the primary output as <name>_wWIDTH.webp)\n", widths)
 	}
 	fmt.Printf("%-30s | %-10s | %-10s | %-8s | %-8s | %-10s | %-15s | %-7s | %-16s\n", "Filename", "Original", "Compressed", "Savings", "PSNR", "Entropy", "BlurHash", "DomColor", "pHash")
 	fmt.Println(string(make([]byte, 160)))
@@ -78,12 +85,11 @@ func main() {
 		}
 
 		inputPath := filepath.Join(inputDir, file.Name())
-		
-		outputName := file.Name() + ".webp"
+
+		baseName := file.Name()
 		if quality > 0 {
-			outputName = fmt.Sprintf("%s-q%d.webp", file.Name(), quality)
+			baseName = fmt.Sprintf("%s-q%d", file.Name(), quality)
 		}
-		outputPath := filepath.Join(outputDir, outputName)
 
 		data, err := ioutil.ReadFile(inputPath)
 		if err != nil {
@@ -93,7 +99,7 @@ func main() {
 
 		start := time.Now()
 		cfg := processor.ImageConfig{Quality: quality, MaxHeight: processor.DefaultConfig.MaxHeight}
-		results, err := processor.ProcessLossy(data, cfg, false)
+		results, err := processor.ProcessLossy(data, cfg, false, widths)
 		duration := time.Since(start).Round(time.Millisecond)
 
 		if err != nil {
@@ -105,13 +111,30 @@ func main() {
 			fmt.Printf("No results for %s\n", file.Name())
 			continue
 		}
+
+		// Every result (the original plus any requested variants) is written to
+		// disk so the output is visually inspectable, not just measured. Only
+		// the primary/"original" result feeds the savings/PSNR table below —
+		// variants are reported on their own summary line.
 		processed := results[0].Data
 		metadata := results[0].Metadata
-
-		err = ioutil.WriteFile(outputPath, processed, 0644)
-		if err != nil {
+		outputPath := filepath.Join(outputDir, baseName+".webp")
+		if err := ioutil.WriteFile(outputPath, processed, 0644); err != nil {
 			fmt.Printf("Error writing %s: %v\n", file.Name(), err)
 			continue
+		}
+
+		for _, variant := range results[1:] {
+			w := 0
+			if variant.Metadata != nil {
+				w = variant.Metadata.Width
+			}
+			variantPath := filepath.Join(outputDir, fmt.Sprintf("%s_w%d.webp", baseName, w))
+			if err := ioutil.WriteFile(variantPath, variant.Data, 0644); err != nil {
+				fmt.Printf("Error writing variant %s: %v\n", variantPath, err)
+				continue
+			}
+			fmt.Printf("  %-28s | variant w=%-4d | %s (kind=%s)\n", file.Name(), w, formatSize(len(variant.Data)), variant.Kind)
 		}
 
 		psnrValue := calculatePSNR(data, processed)
@@ -143,10 +166,10 @@ func main() {
 			pHash = metadata.PHash
 		}
 
-		fmt.Printf("%-30s | %-10s | %-10s | %-7.2f%% | %-8s | Ent: %-5.2f | BH: %-15s | DC: %-7s | pH: %-16s | (%v)\n", 
-			file.Name(), 
-			formatSize(int(originalSize)), 
-			formatSize(int(compressedSize)), 
+		fmt.Printf("%-30s | %-10s | %-10s | %-7.2f%% | %-8s | Ent: %-5.2f | BH: %-15s | DC: %-7s | pH: %-16s | (%v)\n",
+			file.Name(),
+			formatSize(int(originalSize)),
+			formatSize(int(compressedSize)),
 			savings,
 			psnrStr,
 			entropy,
@@ -174,10 +197,10 @@ func main() {
 		totalSavings := 100.0 - (float64(totalCompressed) / float64(totalOriginal) * 100.0)
 		avgPSNR := totalPSNR / float64(count)
 		fmt.Println(string(make([]byte, 85)))
-		fmt.Printf("%-30s | %-10s | %-10s | %-7.2f%% | %-8.2fdB\n", 
-			"TOTAL", 
-			formatSize(int(totalOriginal)), 
-			formatSize(int(totalCompressed)), 
+		fmt.Printf("%-30s | %-10s | %-10s | %-7.2f%% | %-8.2fdB\n",
+			"TOTAL",
+			formatSize(int(totalOriginal)),
+			formatSize(int(totalCompressed)),
 			totalSavings,
 			avgPSNR)
 		fmt.Printf("\nTotal space saved: %s\n", formatSize(int(totalOriginal-totalCompressed)))
@@ -232,7 +255,31 @@ func calculatePSNR(originalData, processedData []byte) float64 {
 		return math.Inf(1)
 	}
 
-	return 20 * math.Log10(255) - 10*math.Log10(mse)
+	return 20*math.Log10(255) - 10*math.Log10(mse)
+}
+
+// parseVariantWidths reads a comma-separated width list (e.g. "600,300")
+// from VARIANT_WIDTHS. Empty/unset means no variants, preserving the tool's
+// original single-output behaviour.
+func parseVariantWidths(raw string) []int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	widths := make([]int, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		w, err := strconv.Atoi(p)
+		if err != nil {
+			log.Fatalf("invalid VARIANT_WIDTHS entry %q: %v", p, err)
+		}
+		widths = append(widths, w)
+	}
+	return widths
 }
 
 func isSupported(ext string) bool {

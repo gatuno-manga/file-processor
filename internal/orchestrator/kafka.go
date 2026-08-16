@@ -8,6 +8,7 @@ import (
 
 	"github.com/luis/file-processor/internal/pool"
 	"github.com/luis/file-processor/internal/port"
+	"github.com/luis/file-processor/internal/processor"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -27,15 +28,13 @@ func NewKafkaOrchestrator(storage port.Storage, producer port.KafkaProducer, p *
 
 func (o *KafkaOrchestrator) Run(ctx context.Context, consumer port.KafkaConsumer) error {
 	slog.Info("Kafka orchestrator starting...")
-	return consumer.Consume(ctx, func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
-		return o.Handle(ctx, rawBucket, rawPath, originalUrl, targetBucket, targetPath, isBackfill)
-	})
+	return consumer.Consume(ctx, o.Handle)
 }
 
-func (o *KafkaOrchestrator) Handle(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error {
-	slog.Info("processing image", "rawBucket", rawBucket, "rawPath", rawPath, "originalUrl", originalUrl, "targetBucket", targetBucket, "targetPath", targetPath, "isBackfill", isBackfill)
+func (o *KafkaOrchestrator) Handle(ctx context.Context, req port.ImageProcessingRequest) error {
+	slog.Info("processing image", "rawBucket", req.RawBucket, "rawPath", req.RawPath, "originalUrl", req.OriginalUrl, "targetBucket", req.TargetBucket, "targetPath", req.TargetPath, "isBackfill", req.IsBackfill, "widths", req.Widths)
 
-	finalBucket, finalKey, err := parseBucketAndKey(rawBucket, rawPath)
+	finalBucket, finalKey, err := parseBucketAndKey(req.RawBucket, req.RawPath)
 	if err != nil {
 		return err
 	}
@@ -46,7 +45,7 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawBucket, rawPath, orig
 	}
 	defer o.storage.Release(data)
 
-	results, err := o.pool.Submit(ctx, data, isBackfill)
+	results, err := o.pool.Submit(ctx, data, req.IsBackfill, req.Widths)
 	if err != nil {
 		return fmt.Errorf("failed to process image in pool: %w", err)
 	}
@@ -57,30 +56,23 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawBucket, rawPath, orig
 	for i, res := range results {
 		i, res := i, res
 		g.Go(func() error {
-			currentPath := targetPath
-			if len(results) > 1 {
-				extIdx := strings.LastIndex(targetPath, ".")
-				if extIdx != -1 {
-					currentPath = fmt.Sprintf("%s_part%d%s", targetPath[:extIdx], i+1, targetPath[extIdx:])
-				} else {
-					currentPath = fmt.Sprintf("%s_part%d", targetPath, i+1)
-				}
-			}
+			currentPath := targetPathFor(req.TargetPath, res, i)
 
-			if !isBackfill || (targetBucket != finalBucket || currentPath != finalKey) {
+			if !req.IsBackfill || (req.TargetBucket != finalBucket || currentPath != finalKey) {
 				contentType := "image/webp"
 				if res.Metadata != nil && res.Metadata.MimeType != "" {
 					contentType = res.Metadata.MimeType
 				}
 
-				if err := o.storage.Upload(groupCtx, targetBucket, currentPath, res.Data, contentType); err != nil {
-					return fmt.Errorf("failed to upload processed image part %d to s3: %w", i+1, err)
+				if err := o.storage.Upload(groupCtx, req.TargetBucket, currentPath, res.Data, contentType); err != nil {
+					return fmt.Errorf("failed to upload processed image %q (kind=%s) to s3: %w", currentPath, res.Kind, err)
 				}
 			}
 
 			processingResults[i] = port.ProcessingResult{
 				TargetPath: currentPath,
 				Metadata:   res.Metadata,
+				Kind:       res.Kind,
 			}
 			return nil
 		})
@@ -90,16 +82,43 @@ func (o *KafkaOrchestrator) Handle(ctx context.Context, rawBucket, rawPath, orig
 		return err
 	}
 
-	if !isBackfill {
+	if !req.IsBackfill {
 		if err := o.storage.Delete(ctx, finalBucket, finalKey); err != nil {
 			slog.Warn("failed to delete original image from s3", "error", err, "bucket", finalBucket, "key", finalKey)
 		}
 	}
 
-	if err := o.producer.EmitProcessingCompletedEvent(ctx, rawPath, originalUrl, targetBucket, processingResults); err != nil {
+	if err := o.producer.EmitProcessingCompletedEvent(ctx, req.RawPath, req.OriginalUrl, req.TargetBucket, processingResults); err != nil {
 		return fmt.Errorf("failed to emit processing completed event to kafka: %w", err)
 	}
 
-	slog.Info("image processed successfully", "rawPath", rawPath, "resultsCount", len(results))
+	slog.Info("image processed successfully", "rawPath", req.RawPath, "resultsCount", len(results))
 	return nil
+}
+
+// targetPathFor derives the S3 key for one processed result. "original" keeps
+// the caller-requested targetPath untouched; "part" (a tall-image slice) and
+// "variant" (a smaller rendition) each get their own suffix convention so the
+// two schemes never collide — a request never produces both kinds at once
+// (processor.ProcessLossy rejects widths for split-eligible images).
+func targetPathFor(targetPath string, res processor.ProcessedResult, index int) string {
+	var suffix string
+	switch res.Kind {
+	case processor.KindPart:
+		suffix = fmt.Sprintf("_part%d", index+1)
+	case processor.KindVariant:
+		width := 0
+		if res.Metadata != nil {
+			width = res.Metadata.Width
+		}
+		suffix = fmt.Sprintf("_w%d", width)
+	default:
+		return targetPath
+	}
+
+	extIdx := strings.LastIndex(targetPath, ".")
+	if extIdx == -1 {
+		return targetPath + suffix
+	}
+	return targetPath[:extIdx] + suffix + targetPath[extIdx:]
 }

@@ -220,6 +220,7 @@ func (a *KafkaAdapter) EmitProcessingCompletedEvent(ctx context.Context, rawPath
 		}
 		eventResults[i] = ImageProcessingResult{
 			TargetPath: res.TargetPath,
+			Kind:       res.Kind,
 			Metadata: &MetadataEventField{
 				Width:         meta.Width,
 				Height:        meta.Height,
@@ -387,7 +388,7 @@ func (a *KafkaAdapter) handleWithRetry(ctx context.Context, r kafkaReader, dlq k
 // after retries are exhausted (message is dead-lettered), or after a panic is
 // recovered (message is dead-lettered). Otherwise the message is left
 // uncommitted so Kafka redelivers it.
-func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, rawBucket, rawPath, originalUrl, targetBucket, targetPath string, isBackfill bool) error) error {
+func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Context, req port.ImageProcessingRequest) error) error {
 	defer a.reader.Close()
 
 	backoff := initialBackoff
@@ -425,6 +426,15 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 			continue
 		}
 
+		if len(event.Widths) > processor.MaxVariantWidths {
+			slog.Error("too many variant widths requested, routing to DLQ", "count", len(event.Widths), "max", processor.MaxVariantWidths, "offset", msg.Offset)
+			a.sendToDLQ(ctx, a.dlqWriter, msg, fmt.Errorf("too many variant widths requested: %d (max %d)", len(event.Widths), processor.MaxVariantWidths), "validate")
+			if err := a.reader.CommitMessages(ctx, msg); err != nil {
+				slog.Error("failed to commit oversized-widths image message", "error", err)
+			}
+			continue
+		}
+
 		select {
 		case a.imageSemaphore <- struct{}{}:
 		case <-ctx.Done():
@@ -437,7 +447,15 @@ func (a *KafkaAdapter) Consume(ctx context.Context, handler func(ctx context.Con
 			defer func() { <-a.imageSemaphore }()
 
 			a.handleWithRetry(ctx, a.reader, a.dlqWriter, m, "handler", func(msgCtx context.Context) error {
-				return handler(msgCtx, e.RawBucket, e.RawPath, e.OriginalUrl, e.TargetBucket, e.TargetPath, e.IsBackfill)
+				return handler(msgCtx, port.ImageProcessingRequest{
+					RawBucket:    e.RawBucket,
+					RawPath:      e.RawPath,
+					OriginalUrl:  e.OriginalUrl,
+					TargetBucket: e.TargetBucket,
+					TargetPath:   e.TargetPath,
+					IsBackfill:   e.IsBackfill,
+					Widths:       e.Widths,
+				})
 			})
 		}(msg, event)
 	}

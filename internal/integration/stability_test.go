@@ -92,9 +92,9 @@ func monitorResources(ctx context.Context, wg *sync.WaitGroup, m *Metrics) {
 			currentTicks := getCPUTicks()
 			deltaTicks := currentTicks - lastTicks
 			deltaTime := now.Sub(lastTime).Seconds()
-			
+
 			if deltaTime > 0 {
-				cpuPercent := float64(deltaTicks) / deltaTime 
+				cpuPercent := float64(deltaTicks) / deltaTime
 				if cpuPercent > m.PeakCPU {
 					m.PeakCPU = cpuPercent
 				}
@@ -118,10 +118,16 @@ func TestStabilityBenchmark(t *testing.T) {
 		name   string
 		width  int
 		height int
+		// widths requests the opt-in multi-resolution variants feature
+		// alongside the primary output, to measure its real RSS/CPU/latency
+		// cost against the equivalent no-variants baseline at the same
+		// resolution and concurrency (see .planning/research/IMPACT-multi-resolution-variants.md §3).
+		widths []int
 	}{
-		{"800x600", 800, 600},
-		{"FullHD", 1920, 1080},
-		{"4K", 3840, 2160},
+		{"800x600", 800, 600, nil},
+		{"FullHD", 1920, 1080, nil},
+		{"FullHD+variants(600,300)", 1920, 1080, []int{600, 300}},
+		{"4K", 3840, 2160, nil},
 	}
 
 	const count = 1000
@@ -155,7 +161,7 @@ func TestStabilityBenchmark(t *testing.T) {
 					defer pCancel()
 
 					start := time.Now()
-					_, err := p.Submit(pCtx, input, false)
+					_, err := p.Submit(pCtx, input, false, res.widths)
 					elapsed := time.Since(start)
 
 					if err != nil {
@@ -183,7 +189,7 @@ func TestStabilityBenchmark(t *testing.T) {
 				}
 			}
 
-			fmt.Printf("\n--- [%s] STABILITY TEST RESULTS (%d images) ---\n", res.name, count)
+			fmt.Printf("\n--- [%s] STABILITY TEST RESULTS (%d images, widths=%v) ---\n", res.name, count, res.widths)
 			fmt.Printf("Tempo Total:       %v\n", batchDuration)
 			if successCount > 0 {
 				fmt.Printf("Tempo por Imagem:  %.4f ms (Avg Latency)\n", float64(totalLat.Milliseconds())/float64(successCount))
@@ -197,6 +203,68 @@ func TestStabilityBenchmark(t *testing.T) {
 			for err := range errChan {
 				t.Errorf("Process error: %v", err)
 			}
+		})
+	}
+}
+
+// TestStabilityBenchmark_SingleImageLatency measures per-image processing
+// time with no queueing/contention: one image submitted at a time, sequentially,
+// against a single-worker pool. TestStabilityBenchmark's "Tempo por Imagem"
+// figure is measured under 1000-way concurrency against a 4-worker pool, so it
+// includes queue wait time and is not a per-image service-time figure. This
+// test isolates the actual libvips decode+encode(+variants) cost per call.
+func TestStabilityBenchmark_SingleImageLatency(t *testing.T) {
+	p := pool.NewWorkerPool(1, processor.DefaultConfig)
+	defer p.Shutdown()
+
+	const iterations = 30
+	const warmup = 3
+
+	cases := []struct {
+		name   string
+		widths []int
+	}{
+		{"FullHD", nil},
+		{"FullHD+variants(600,300)", []int{600, 300}},
+	}
+
+	input, err := generateStabilityImage(1920, 1080)
+	if err != nil {
+		t.Fatalf("failed to generate FullHD fixture: %v", err)
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var durations []time.Duration
+			for i := 0; i < warmup+iterations; i++ {
+				start := time.Now()
+				if _, err := p.Submit(context.Background(), input, false, c.widths); err != nil {
+					t.Fatalf("Submit failed: %v", err)
+				}
+				elapsed := time.Since(start)
+				if i >= warmup {
+					durations = append(durations, elapsed)
+				}
+			}
+
+			var total, min, max time.Duration
+			min = durations[0]
+			for _, d := range durations {
+				total += d
+				if d < min {
+					min = d
+				}
+				if d > max {
+					max = d
+				}
+			}
+			avg := total / time.Duration(len(durations))
+
+			fmt.Printf("\n--- [%s] SINGLE-IMAGE LATENCY (%d samples, widths=%v) ---\n", c.name, len(durations), c.widths)
+			fmt.Printf("Min:  %v\n", min)
+			fmt.Printf("Avg:  %v\n", avg)
+			fmt.Printf("Max:  %v\n", max)
+			fmt.Printf("---------------------------------------------\n")
 		})
 	}
 }

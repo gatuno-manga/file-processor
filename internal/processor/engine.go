@@ -39,10 +39,26 @@ type Metadata struct {
 	Entropy       float64 `json:"entropy"`
 }
 
+// Result kinds distinguish a full-resolution/original output from a smaller
+// derived rendition, so callers never have to guess what a given
+// ProcessedResult represents.
+const (
+	KindOriginal = "original"
+	KindPart     = "part"
+	KindVariant  = "variant"
+)
+
+// MaxVariantWidths bounds how many smaller renditions a single request may ask
+// for, independent of caller trust, to keep worst-case CPU/memory cost bounded.
+const MaxVariantWidths = 5
+
 // ProcessedResult wraps the output bytes and metadata of a single processed image.
 type ProcessedResult struct {
 	Data     []byte
 	Metadata *Metadata
+	// Kind is one of KindOriginal, KindPart (a vertical slice of a tall,
+	// split image) or KindVariant (a smaller rendition requested via widths).
+	Kind string
 }
 
 // ImageConfig holds the tunable parameters for image processing.
@@ -63,11 +79,16 @@ var DefaultConfig = ImageConfig{
 
 // Process processes the input image with the default configuration.
 func Process(input []byte) ([]ProcessedResult, error) {
-	return ProcessLossy(input, DefaultConfig, false)
+	return ProcessLossy(input, DefaultConfig, false, nil)
 }
 
 // ProcessLossy converts the input image to WebP using the provided config.
-func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedResult, error) {
+// widths is an optional, caller-supplied list of additional smaller renditions
+// to generate alongside the primary output (opt-in "variants" feature). It is
+// mutually exclusive with tall-image splitting: a source taller than
+// cfg.MaxHeight rejects a non-empty widths list rather than silently ignoring
+// it or combining the two schemes.
+func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool, widths []int) ([]ProcessedResult, error) {
 	start := time.Now()
 	defer func() {
 		processedTotal.WithLabelValues("image").Inc()
@@ -78,10 +99,18 @@ func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedRe
 		return nil, errors.New("input buffer is empty")
 	}
 
+	if len(widths) > MaxVariantWidths {
+		return nil, fmt.Errorf("too many variant widths requested: %d (max %d)", len(widths), MaxVariantWidths)
+	}
+
 	img := bimg.NewImage(input)
 	size, err := img.Size()
 	if err != nil {
 		return nil, err
+	}
+
+	if len(widths) > 0 && size.Height > cfg.MaxHeight {
+		return nil, fmt.Errorf("variant widths are not supported for images taller than %d (got %d): split and variants are mutually exclusive", cfg.MaxHeight, size.Height)
 	}
 
 	if isBackfill && size.Height <= cfg.MaxHeight {
@@ -91,7 +120,12 @@ func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedRe
 			if err == nil {
 				metadata.SizeBytes = len(input)
 				metadata.MimeType = "image/webp"
-				return []ProcessedResult{{Data: input, Metadata: metadata}}, nil
+				variants, err := generateVariants(input, size.Width, cfg, widths)
+				if err != nil {
+					return nil, err
+				}
+				results := append([]ProcessedResult{{Data: input, Metadata: metadata, Kind: KindOriginal}}, variants...)
+				return results, nil
 			}
 		}
 	}
@@ -121,7 +155,12 @@ func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedRe
 		}
 		metadata.SizeBytes = len(output)
 		metadata.MimeType = "image/webp"
-		return []ProcessedResult{{Data: output, Metadata: metadata}}, nil
+		variants, err := generateVariants(input, size.Width, cfg, widths)
+		if err != nil {
+			return nil, err
+		}
+		results := append([]ProcessedResult{{Data: output, Metadata: metadata, Kind: KindOriginal}}, variants...)
+		return results, nil
 	}
 
 	slog.Info("long image detected, splitting", "height", size.Height, "maxHeight", cfg.MaxHeight)
@@ -158,8 +197,60 @@ func ProcessLossy(input []byte, cfg ImageConfig, isBackfill bool) ([]ProcessedRe
 		}
 		metadata.SizeBytes = len(output)
 		metadata.MimeType = "image/webp"
-		results = append(results, ProcessedResult{Data: output, Metadata: metadata})
+		results = append(results, ProcessedResult{Data: output, Metadata: metadata, Kind: KindPart})
 	}
 
 	return results, nil
+}
+
+// generateVariants renders one smaller WebP rendition per requested width,
+// skipping (with a warning, not an error) any width that would upscale the
+// source rather than downscale it. Widths are resized from source, not from
+// an already-encoded output, so a variant never compounds a second lossy
+// re-encode on top of the primary conversion.
+func generateVariants(source []byte, sourceWidth int, cfg ImageConfig, widths []int) ([]ProcessedResult, error) {
+	if len(widths) == 0 {
+		return nil, nil
+	}
+
+	options := bimg.Options{
+		Type:          bimg.WEBP,
+		StripMetadata: true,
+		Speed:         1,
+	}
+	if cfg.Quality > 0 {
+		options.Quality = cfg.Quality
+		options.Lossless = false
+	} else {
+		options.Lossless = true
+	}
+
+	variants := make([]ProcessedResult, 0, len(widths))
+	for _, w := range widths {
+		if w <= 0 {
+			return nil, fmt.Errorf("invalid variant width: %d", w)
+		}
+		if w >= sourceWidth {
+			slog.Warn("skipping variant width: not smaller than source width", "width", w, "sourceWidth", sourceWidth)
+			continue
+		}
+
+		variantOptions := options
+		variantOptions.Width = w
+		output, err := bimg.NewImage(source).Process(variantOptions)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate %dw variant: %w", w, err)
+		}
+
+		metadata, err := extractMetadata(output)
+		if err != nil {
+			slog.Warn("metadata extraction failed for variant, emitting partial metadata", "width", w, "error", err)
+			metadata = &Metadata{Width: w}
+		}
+		metadata.SizeBytes = len(output)
+		metadata.MimeType = "image/webp"
+		variants = append(variants, ProcessedResult{Data: output, Metadata: metadata, Kind: KindVariant})
+	}
+
+	return variants, nil
 }

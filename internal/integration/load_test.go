@@ -67,7 +67,7 @@ func TestLoadConcurrency(t *testing.T) {
 
 			for _, count := range testCounts {
 				if res.name == "4K" && count > 100 {
-					continue 
+					continue
 				}
 
 				t.Run(fmt.Sprintf("ConcurrentCount-%d", count), func(t *testing.T) {
@@ -75,11 +75,11 @@ func TestLoadConcurrency(t *testing.T) {
 					errChan := make(chan error, count)
 					durations := make([]time.Duration, count)
 					var mu sync.Mutex
-					
+
 					var memStart runtime.MemStats
 					runtime.GC()
 					runtime.ReadMemStats(&memStart)
-					
+
 					batchStart := time.Now()
 
 					for i := 0; i < count; i++ {
@@ -91,9 +91,9 @@ func TestLoadConcurrency(t *testing.T) {
 							defer cancel()
 
 							individualStart := time.Now()
-							_, err := p.Submit(ctx, input, false)
+							_, err := p.Submit(ctx, input, false, nil)
 							elapsed := time.Since(individualStart)
-							
+
 							if err != nil {
 								errChan <- err
 							} else {
@@ -110,7 +110,7 @@ func TestLoadConcurrency(t *testing.T) {
 					batchDuration := time.Since(batchStart)
 					var memEnd runtime.MemStats
 					runtime.ReadMemStats(&memEnd)
-					
+
 					var total time.Duration
 					var min time.Duration = 999 * time.Hour
 					var max time.Duration
@@ -134,7 +134,7 @@ func TestLoadConcurrency(t *testing.T) {
 					if successCount > 0 {
 						t.Logf("Individual Latency - Avg: %v, Min: %v, Max: %v", total/time.Duration(successCount), min, max)
 					}
-					
+
 					allocMB := float64(memEnd.TotalAlloc-memStart.TotalAlloc) / 1024 / 1024
 					heapInUseMB := float64(memEnd.HeapInuse) / 1024 / 1024
 					t.Logf("Resource Usage:")

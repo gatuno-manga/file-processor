@@ -36,7 +36,12 @@ func (s *Server) Process(ctx context.Context, req *pb.ProcessRequest) (*pb.Proce
 		return nil, status.Error(codes.InvalidArgument, "empty request data")
 	}
 
-	results, err := s.pool.Submit(ctx, req.GetData(), false)
+	widths := make([]int, len(req.GetWidths()))
+	for i, w := range req.GetWidths() {
+		widths[i] = int(w)
+	}
+
+	results, err := s.pool.Submit(ctx, req.GetData(), false, widths)
 	if err != nil {
 		if err == context.DeadlineExceeded {
 			return nil, status.Error(codes.DeadlineExceeded, "processing deadline exceeded")
@@ -51,7 +56,23 @@ func (s *Server) Process(ctx context.Context, req *pb.ProcessRequest) (*pb.Proce
 		return nil, status.Error(codes.Internal, "no results generated")
 	}
 
+	pbResults := make([]*pb.ProcessedImage, len(results))
+	for i, res := range results {
+		width := 0
+		if res.Metadata != nil {
+			width = res.Metadata.Width
+		}
+		pbResults[i] = &pb.ProcessedImage{
+			Data:  res.Data,
+			Kind:  res.Kind,
+			Width: int32(width),
+		}
+	}
+
 	return &pb.ProcessResponse{
-		Data: results[0].Data,
+		// Deprecated field, kept for one release so pre-existing callers that
+		// only read Data still get the primary/original image.
+		Data:    results[0].Data,
+		Results: pbResults,
 	}, nil
 }

@@ -8,6 +8,11 @@ type ImageProcessingRequestedEvent struct {
 	TargetBucket string `json:"targetBucket"`
 	TargetPath   string `json:"targetPath"`
 	IsBackfill   bool   `json:"isBackfill"`
+	// Widths is an optional, opt-in list of additional smaller renditions to
+	// generate alongside the primary output (e.g. [320, 640, 1024]). Omitted
+	// or empty means no variants. Rejected for images taller than the split
+	// threshold — splitting and variants are mutually exclusive.
+	Widths []int `json:"widths,omitempty"`
 }
 
 // ImageProcessingCompletedEvent represents the payload sent to the image.processing.completed topic.
@@ -19,8 +24,11 @@ type ImageProcessingCompletedEvent struct {
 }
 
 type ImageProcessingResult struct {
-	TargetPath string              `json:"targetPath"`
-	Metadata   *MetadataEventField `json:"metadata"`
+	TargetPath string `json:"targetPath"`
+	// Kind is "original", "part" (a vertical slice of a tall, split image),
+	// or "variant" (a smaller rendition requested via widths).
+	Kind     string              `json:"kind"`
+	Metadata *MetadataEventField `json:"metadata"`
 }
 
 type MetadataEventField struct {

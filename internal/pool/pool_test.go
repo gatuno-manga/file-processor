@@ -22,12 +22,12 @@ func TestNewWorkerPool(t *testing.T) {
 
 func TestSubmit_Success(t *testing.T) {
 	p := NewWorkerPool(1, processor.DefaultConfig)
-	p.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
+	p.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool, widths []int) ([]processor.ProcessedResult, error) {
 		return []processor.ProcessedResult{{Data: []byte("processed"), Metadata: &processor.Metadata{}}}, nil
 	})
 	defer p.Shutdown()
 
-	results, err := p.Submit(context.Background(), []byte("input"), false)
+	results, err := p.Submit(context.Background(), []byte("input"), false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestSubmit_Success(t *testing.T) {
 
 func TestSubmit_Timeout(t *testing.T) {
 	p := NewWorkerPool(1, processor.DefaultConfig)
-	p.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
+	p.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool, widths []int) ([]processor.ProcessedResult, error) {
 		time.Sleep(10 * time.Millisecond)
 		return []processor.ProcessedResult{{Data: []byte("processed"), Metadata: nil}}, nil
 	})
@@ -47,7 +47,7 @@ func TestSubmit_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	_, err := p.Submit(ctx, []byte("some data"), false)
+	_, err := p.Submit(ctx, []byte("some data"), false, nil)
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
 	}
@@ -63,7 +63,7 @@ func TestWorkerPool_CancelledSubmitDoesNotLeakResult(t *testing.T) {
 	p := NewWorkerPool(1, processor.DefaultConfig)
 	unblockA := make(chan struct{})
 	sentA := make(chan struct{})
-	p.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool) ([]processor.ProcessedResult, error) {
+	p.SetProcessFunc(func(data []byte, cfg processor.ImageConfig, isBackfill bool, widths []int) ([]processor.ProcessedResult, error) {
 		if string(data) == "A" {
 			<-unblockA
 			close(sentA)
@@ -82,7 +82,7 @@ func TestWorkerPool_CancelledSubmitDoesNotLeakResult(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := p.Submit(ctx, []byte("A"), false)
+	_, err := p.Submit(ctx, []byte("A"), false, nil)
 	if err != context.Canceled {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -92,7 +92,7 @@ func TestWorkerPool_CancelledSubmitDoesNotLeakResult(t *testing.T) {
 	<-sentA
 	time.Sleep(15 * time.Millisecond)
 
-	results, err := p.Submit(context.Background(), []byte("B"), false)
+	results, err := p.Submit(context.Background(), []byte("B"), false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestShutdown(t *testing.T) {
 	p := NewWorkerPool(2, processor.DefaultConfig)
 	p.Shutdown()
 
-	_, err := p.Submit(context.Background(), []byte("data"), false)
+	_, err := p.Submit(context.Background(), []byte("data"), false, nil)
 	if err == nil || err.Error() != "worker pool is closed" {
 		t.Errorf("expected 'worker pool is closed' error, got %v", err)
 	}
