@@ -13,9 +13,28 @@ service ImageProcessor {
 // ProcessRequest contains the raw image data to be processed.
 message ProcessRequest {
   bytes data = 1;
+  // Optional widths (in pixels) for additional smaller renditions to
+  // generate alongside the primary output. Opt-in: empty means no variants.
+  // Capped server-side (see internal/processor.MaxVariantWidths); rejected
+  // entirely for images taller than the split threshold, since splitting and
+  // variants are mutually exclusive.
+  repeated int32 widths = 2;
 }
 
-// ProcessResponse contains the optimized image data.
-message ProcessResponse {
+// ProcessedImage is one output image: either the primary conversion, a
+// tall-image split part, or a smaller variant.
+message ProcessedImage {
   bytes data = 1;
+  // "original", "part", or "variant" — see internal/processor.Kind*.
+  string kind = 2;
+  // Width in pixels of this specific output. Always populated.
+  int32 width = 3;
+}
+
+// ProcessResponse contains the optimized image(s).
+message ProcessResponse {
+  // Deprecated: use results[0].data instead. Retained for one release so
+  // existing callers keep working; always mirrors the "original" image.
+  bytes data = 1 [deprecated = true];
+  repeated ProcessedImage results = 2;
 }
