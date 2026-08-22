@@ -10,11 +10,15 @@ on:
       - main
       - developer
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     uses: gatuno-manga/workflows/.github/workflows/go-ci.yml@main
     with:
-      go_version: '1.23'
+      go_version: '1.26'
       install_libvips: true
 
   build-and-publish:
